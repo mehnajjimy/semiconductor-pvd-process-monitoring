@@ -186,5 +186,4 @@ calculated. Because sequence is not established, the project does not claim
 chronological SPC control limits or use I-MR, EWMA, or CUSUM charts.
 
 See [`report/technical_report.md`](report/technical_report.md) for the concise
-engineering report and [`GITHUB_GUIDE.md`](GITHUB_GUIDE.md) for a safe,
-step-by-step publishing workflow.
+engineering report 
