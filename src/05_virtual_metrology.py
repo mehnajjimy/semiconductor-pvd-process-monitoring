@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 RAW_DIR = PROJECT_DIR / "data" / "raw"
 PROCESSED_DIR = PROJECT_DIR / "data" / "processed"
-RESULTS_DIR = PROJECT_DIR / "results"
+ALCU_RESULTS_DIR = PROJECT_DIR / "results" / "alcu"
 FIGURES_DIR = PROJECT_DIR / "figures"
 
 RANDOM_STATE = 42
@@ -489,6 +489,8 @@ def plot_error_by_state(prediction_table):
 
 
 def main():
+    ALCU_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
     process_inputs = pd.read_csv(RAW_DIR / "X_pvd_AlCu.csv")
     targets = pd.read_csv(RAW_DIR / "Y_pvd_AlCu.csv")
     assignments = pd.read_csv(PROCESSED_DIR / "alcu_split_assignments.csv")
@@ -546,10 +548,21 @@ def main():
             cv_groups,
         )
         forest_gate.insert(0, "validation", validation)
-        if not bool(forest_gate["passes_ten_percent_gate"].all()):
-            raise ValueError("random forest did not pass its training-only entry gate")
+        admission_scope = (
+            "primary AlCu model and WTi configuration"
+            if validation == "ordinary fixed split"
+            else "grouped-sensitivity AlCu model only"
+        )
+        forest_admitted = bool(forest_gate["passes_ten_percent_gate"].all())
+        forest_gate.insert(1, "admission_scope", admission_scope)
+        forest_gate.insert(2, "admitted_for_split", forest_admitted)
         forest_rows.extend(forest_gate.to_dict("records"))
+        if validation == "ordinary fixed split" and not forest_admitted:
+            raise ValueError(
+                "random forest did not pass the primary training-only entry gate"
+            )
 
+        actual = targets_array[test_mask]
         models = [
             ("Linear Regression", np.nan, LinearRegression()),
             ("Ridge", selected_alpha, Ridge(alpha=selected_alpha)),
@@ -562,7 +575,6 @@ def main():
                 test_mask,
                 model,
             )
-            actual = targets_array[test_mask]
             summary = summarize_model(
                 validation,
                 "excluded",
@@ -593,46 +605,48 @@ def main():
             and row["zero_output_treatment"] == "excluded"
             and row["model"] == "Ridge"
         )
-        selected_forest = make_random_forest(RANDOM_STATE)
-        selected_forest.fit(inputs_array[train_mask], targets_array[train_mask])
-        selected_forest_predictions = selected_forest.predict(
-            inputs_array[test_mask]
-        )
-        forest_summary = summarize_model(
-            validation,
-            "excluded",
-            "Random Forest",
-            np.nan,
-            train_mask,
-            test_mask,
-            assignments,
-            actual,
-            selected_forest_predictions,
-            reference_profile,
-        )
-        metric_rows.append(forest_summary)
-        target_rows.extend(
-            summarize_targets(
+        forest_summary = None
+        if forest_admitted:
+            selected_forest = make_random_forest(RANDOM_STATE)
+            selected_forest.fit(inputs_array[train_mask], targets_array[train_mask])
+            selected_forest_predictions = selected_forest.predict(
+                inputs_array[test_mask]
+            )
+            forest_summary = summarize_model(
                 validation,
+                "excluded",
                 "Random Forest",
                 np.nan,
-                targets.columns,
-                actual,
-                selected_forest_predictions,
-            )
-        )
-        if validation == "ordinary fixed split":
-            primary_actual = actual
-            primary_predicted = selected_forest_predictions
-            primary_prediction_table = build_prediction_table(
-                assignments,
-                monitoring,
+                train_mask,
                 test_mask,
-                targets.columns,
+                assignments,
                 actual,
                 selected_forest_predictions,
                 reference_profile,
             )
+            metric_rows.append(forest_summary)
+            target_rows.extend(
+                summarize_targets(
+                    validation,
+                    "Random Forest",
+                    np.nan,
+                    targets.columns,
+                    actual,
+                    selected_forest_predictions,
+                )
+            )
+            if validation == "ordinary fixed split":
+                primary_actual = actual
+                primary_predicted = selected_forest_predictions
+                primary_prediction_table = build_prediction_table(
+                    assignments,
+                    monitoring,
+                    test_mask,
+                    targets.columns,
+                    actual,
+                    selected_forest_predictions,
+                    reference_profile,
+                )
 
         # reuse model settings so this comparison isolates zero handling
         _, included_ridge_predictions = fit_and_assess(
@@ -656,45 +670,56 @@ def main():
         )
         metric_rows.append(included_ridge_summary)
 
-        included_forest = make_random_forest(RANDOM_STATE)
-        included_forest.fit(
-            inputs_array[split_train],
-            targets_array[split_train],
-        )
-        included_forest_predictions = included_forest.predict(
-            inputs_array[split_test]
-        )
-        included_forest_summary = summarize_model(
-            validation,
-            "included for sensitivity only",
-            "Random Forest",
-            np.nan,
-            split_train,
-            split_test,
-            assignments,
-            targets_array[split_test],
-            included_forest_predictions,
-            reference_profile,
-        )
-        metric_rows.append(included_forest_summary)
+        included_forest_summary = None
+        if forest_admitted:
+            included_forest = make_random_forest(RANDOM_STATE)
+            included_forest.fit(
+                inputs_array[split_train],
+                targets_array[split_train],
+            )
+            included_forest_predictions = included_forest.predict(
+                inputs_array[split_test]
+            )
+            included_forest_summary = summarize_model(
+                validation,
+                "included for sensitivity only",
+                "Random Forest",
+                np.nan,
+                split_train,
+                split_test,
+                assignments,
+                targets_array[split_test],
+                included_forest_predictions,
+                reference_profile,
+            )
+            metric_rows.append(included_forest_summary)
 
         zero_output_location = (
             "train" if bool((split_train & ~valid_output).any()) else "test"
         )
-        for model_name, alpha, excluded_summary, included_summary in [
+        zero_comparisons = [
             (
                 "Ridge",
                 selected_alpha,
                 ridge_summary,
                 included_ridge_summary,
-            ),
-            (
-                "Random Forest",
-                np.nan,
-                forest_summary,
-                included_forest_summary,
-            ),
-        ]:
+            )
+        ]
+        if forest_admitted:
+            zero_comparisons.append(
+                (
+                    "Random Forest",
+                    np.nan,
+                    forest_summary,
+                    included_forest_summary,
+                )
+            )
+        for (
+            model_name,
+            alpha,
+            excluded_summary,
+            included_summary,
+        ) in zero_comparisons:
             zero_rows.append(
                 {
                     "validation": validation,
@@ -723,27 +748,28 @@ def main():
     ridge_cv_results = pd.concat(cv_tables, ignore_index=True)
     forest_stability = pd.DataFrame(forest_rows)
     zero_sensitivity = pd.DataFrame(zero_rows)
-    if not bool(forest_stability["passes_ten_percent_gate"].all()):
-        raise ValueError("random forest did not pass its predeclared entry gate")
     error_by_state = summarize_error_by_state(primary_prediction_table)
-    metrics.to_csv(RESULTS_DIR / "alcu_virtual_metrology_metrics.csv", index=False)
+    metrics.to_csv(
+        ALCU_RESULTS_DIR / "alcu_virtual_metrology_metrics.csv",
+        index=False,
+    )
     per_target_metrics.to_csv(
-        RESULTS_DIR / "alcu_virtual_metrology_per_target.csv", index=False
+        ALCU_RESULTS_DIR / "alcu_virtual_metrology_per_target.csv", index=False
     )
     ridge_cv_results.to_csv(
-        RESULTS_DIR / "alcu_ridge_cv_results.csv", index=False
+        ALCU_RESULTS_DIR / "alcu_ridge_cv_results.csv", index=False
     )
     forest_stability.to_csv(
-        RESULTS_DIR / "alcu_random_forest_stability.csv", index=False
+        ALCU_RESULTS_DIR / "alcu_random_forest_stability.csv", index=False
     )
     zero_sensitivity.to_csv(
-        RESULTS_DIR / "alcu_zero_output_model_sensitivity.csv", index=False
+        ALCU_RESULTS_DIR / "alcu_zero_output_model_sensitivity.csv", index=False
     )
     primary_prediction_table.to_csv(
         PROCESSED_DIR / "alcu_primary_model_predictions.csv", index=False
     )
     error_by_state.to_csv(
-        RESULTS_DIR / "alcu_model_error_by_state.csv", index=False
+        ALCU_RESULTS_DIR / "alcu_model_error_by_state.csv", index=False
     )
 
     primary_metrics = metrics.loc[

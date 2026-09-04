@@ -7,7 +7,7 @@ import pandas as pd
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 RAW_DIR = PROJECT_DIR / "data" / "raw"
-RESULTS_DIR = PROJECT_DIR / "results"
+AUDIT_RESULTS_DIR = PROJECT_DIR / "results" / "audit"
 
 FILES = {
     "X_AlCu": RAW_DIR / "X_pvd_AlCu.csv",
@@ -86,7 +86,7 @@ def audit_file(file_label, path):
         "duplicate_columns": len(duplicate_columns),
         "minimum": float(np.nanmin(values)),
         "maximum": float(np.nanmax(values)),
-        "outside_zero_one": int(((values < 0) | (values > 1)).sum()),
+        "outside_zero_one": int(((values < 0) | (values >= 1)).sum()),
         "observed_md5": observed_md5,
         "official_md5": EXPECTED_MD5[file_label],
         "official_checksum_match": observed_md5 == EXPECTED_MD5[file_label],
@@ -127,8 +127,11 @@ def audit_process(process, x_data, y_data):
     # x and y have no stored key, so only positional pairing can be checked
     combined = pd.concat([x_data, y_data], axis=1)
     zero_target_mask = (y_data == 0).all(axis=1)
-    target_profiles = pd.util.hash_pandas_object(y_data, index=False)
-    target_group_sizes = target_profiles.value_counts()
+    target_group_sizes = y_data.groupby(
+        list(y_data.columns),
+        dropna=False,
+        sort=False,
+    ).size()
     run_start, run_end, run_length = longest_identical_run(y_data)
 
     return {
@@ -139,7 +142,7 @@ def audit_process(process, x_data, y_data):
         "stored_join_key_available": False,
         "positional_pairing_required": True,
         "combined_duplicate_rows": int(combined.duplicated().sum()),
-        "unique_target_profiles": int(target_profiles.nunique()),
+        "unique_target_profiles": len(target_group_sizes),
         "later_duplicate_target_rows": int(y_data.duplicated().sum()),
         "repeated_target_groups": int((target_group_sizes > 1).sum()),
         "rows_in_repeated_target_groups": int(target_group_sizes[target_group_sizes > 1].sum()),
@@ -155,7 +158,7 @@ def audit_process(process, x_data, y_data):
 
 
 def main():
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    AUDIT_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     loaded_data = {}
     file_summaries = []
@@ -185,9 +188,15 @@ def main():
     process_summary = pd.DataFrame(process_summaries)
     feature_quality = pd.DataFrame(feature_rows)
 
-    file_summary.to_csv(RESULTS_DIR / "data_audit_files.csv", index=False)
-    process_summary.to_csv(RESULTS_DIR / "data_audit_alignment.csv", index=False)
-    feature_quality.to_csv(RESULTS_DIR / "data_audit_features.csv", index=False)
+    file_summary.to_csv(AUDIT_RESULTS_DIR / "data_audit_files.csv", index=False)
+    process_summary.to_csv(
+        AUDIT_RESULTS_DIR / "data_audit_alignment.csv",
+        index=False,
+    )
+    feature_quality.to_csv(
+        AUDIT_RESULTS_DIR / "data_audit_features.csv",
+        index=False,
+    )
 
     print("Data audit complete.")
     print(file_summary[["dataset", "rows", "columns", "missing_cells", "official_checksum_match"]].to_string(index=False))

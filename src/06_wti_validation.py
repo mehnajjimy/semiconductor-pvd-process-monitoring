@@ -19,7 +19,9 @@ import matplotlib.pyplot as plt
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 RAW_DIR = PROJECT_DIR / "data" / "raw"
 PROCESSED_DIR = PROJECT_DIR / "data" / "processed"
-RESULTS_DIR = PROJECT_DIR / "results"
+ALCU_RESULTS_DIR = PROJECT_DIR / "results" / "alcu"
+WTI_RESULTS_DIR = PROJECT_DIR / "results" / "wti"
+COMPARISON_RESULTS_DIR = PROJECT_DIR / "results" / "comparison"
 FIGURES_DIR = PROJECT_DIR / "figures"
 
 EXPLAINED_VARIANCE_TARGET = 0.90
@@ -68,7 +70,7 @@ def make_scaled_model(model):
 
 
 def make_random_forest():
-    # this setting is fixed from the alcu stability check, then refit on wti
+    # this setting is fixed from the primary alcu gate, then refit on wti
     return RandomForestRegressor(
         n_estimators=FOREST_TREES,
         min_samples_leaf=FOREST_MINIMUM_LEAF_SIZE,
@@ -76,6 +78,35 @@ def make_random_forest():
         random_state=RANDOM_STATE,
         n_jobs=-1,
     )
+
+
+def verify_alcu_forest_configuration():
+    gate_path = ALCU_RESULTS_DIR / "alcu_random_forest_stability.csv"
+    gate = pd.read_csv(gate_path)
+    primary = gate.loc[gate["validation"].eq("ordinary fixed split")].copy()
+
+    passed = primary["passes_ten_percent_gate"].astype(str).str.lower().eq("true")
+    if len(primary) != 3 or not bool(passed.all()):
+        raise ValueError(
+            "WTi requires the Random Forest to pass all three primary AlCu "
+            "training-only gate checks"
+        )
+
+    selected = primary.loc[primary["random_state"].eq(RANDOM_STATE)]
+    if len(selected) != 1:
+        raise ValueError("AlCu gate output does not contain the selected seed 42")
+
+    configuration = selected.iloc[0]
+    configuration_matches = (
+        int(configuration["trees"]) == FOREST_TREES
+        and int(configuration["minimum_leaf_size"]) == FOREST_MINIMUM_LEAF_SIZE
+        and np.isclose(
+            float(configuration["maximum_feature_share"]),
+            FOREST_MAX_FEATURE_SHARE,
+        )
+    )
+    if not configuration_matches:
+        raise ValueError("WTi Random Forest settings do not match the admitted AlCu model")
 
 
 def assign_alarm_categories(t2_values, q_values, t2_limit, q_limit):
@@ -210,7 +241,7 @@ def summarize_model(
     selection_source = {
         "Linear Regression": "required baseline",
         "Ridge": "training-only cross-validation",
-        "Random Forest": "fixed after AlCu training-only stability gate",
+        "Random Forest": "fixed after primary AlCu training-only stability gate",
     }[model_name]
 
     return {
@@ -464,7 +495,14 @@ def plot_predictions(actual, predicted, table, metrics):
         f"aggregate R² = {metrics['aggregate_r2_17_targets']:.3f}",
         fontsize=13,
     )
-    figure.tight_layout()
+    figure.text(
+        0.5,
+        0.01,
+        f"Scope: {len(table)} valid held-out rows; all-zero target record excluded.",
+        ha="center",
+        fontsize=9,
+    )
+    figure.tight_layout(rect=(0, 0.05, 1, 1))
     figure.savefig(
         FIGURES_DIR / "12_wti_virtual_metrology_predictions.png",
         dpi=180,
@@ -522,10 +560,18 @@ def plot_cross_process_comparison(comparison):
         axis.grid(axis="y", alpha=0.20)
         axis.spines[["top", "right"]].set_visible(False)
     figure.suptitle(
-        "AlCu Primary Workflow and WTi Validation Workflow",
+        "AlCu Primary Workflow and Separately Fitted WTi Replication",
         fontsize=13,
     )
-    figure.tight_layout()
+    figure.text(
+        0.5,
+        0.01,
+        "Alert rates include all ordinary-split X assessment rows. R² excludes "
+        "all-zero target rows; grouped bars use each grouped sensitivity split.",
+        ha="center",
+        fontsize=8.5,
+    )
+    figure.tight_layout(rect=(0, 0.08, 1, 1))
     figure.savefig(
         FIGURES_DIR / "13_cross_process_workflow_comparison.png",
         dpi=180,
@@ -535,6 +581,10 @@ def plot_cross_process_comparison(comparison):
 
 
 def main():
+    WTI_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    COMPARISON_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    verify_alcu_forest_configuration()
+
     process_inputs = pd.read_csv(RAW_DIR / "X_pvd_WTi.csv")
     targets = pd.read_csv(RAW_DIR / "Y_pvd_WTi.csv")
     assignments = pd.read_csv(PROCESSED_DIR / "wti_split_assignments.csv")
@@ -569,7 +619,7 @@ def main():
         }
     )
     component_table.to_csv(
-        RESULTS_DIR / "wti_pca_explained_variance.csv",
+        WTI_RESULTS_DIR / "wti_pca_explained_variance.csv",
         index=False,
     )
     alarm_counts = (
@@ -582,7 +632,7 @@ def main():
         "primary_split"
     )["observations"].transform("sum")
     alarm_counts.to_csv(
-        RESULTS_DIR / "wti_alarm_category_counts.csv",
+        WTI_RESULTS_DIR / "wti_alarm_category_counts.csv",
         index=False,
     )
     pca_train = assignments["primary_split"].eq("train").to_numpy()
@@ -609,7 +659,7 @@ def main():
         ]
     )
     pca_summary.to_csv(
-        RESULTS_DIR / "wti_pca_monitoring_summary.csv",
+        WTI_RESULTS_DIR / "wti_pca_monitoring_summary.csv",
         index=False,
     )
     zero_monitoring = monitoring.loc[
@@ -625,7 +675,7 @@ def main():
         ],
     ]
     zero_monitoring.to_csv(
-        RESULTS_DIR / "wti_zero_output_monitoring.csv",
+        WTI_RESULTS_DIR / "wti_zero_output_monitoring.csv",
         index=False,
     )
 
@@ -657,7 +707,7 @@ def main():
         ]
     )
     quality_comparison.to_csv(
-        RESULTS_DIR / "wti_held_out_quality_comparison.csv",
+        WTI_RESULTS_DIR / "wti_held_out_quality_comparison.csv",
         index=False,
     )
 
@@ -822,23 +872,23 @@ def main():
     zero_sensitivity = pd.DataFrame(zero_rows)
     error_by_state = summarize_error_by_state(primary_predictions)
     metrics.to_csv(
-        RESULTS_DIR / "wti_virtual_metrology_metrics.csv",
+        WTI_RESULTS_DIR / "wti_virtual_metrology_metrics.csv",
         index=False,
     )
     per_target.to_csv(
-        RESULTS_DIR / "wti_virtual_metrology_per_target.csv",
+        WTI_RESULTS_DIR / "wti_virtual_metrology_per_target.csv",
         index=False,
     )
     ridge_cv.to_csv(
-        RESULTS_DIR / "wti_ridge_cv_results.csv",
+        WTI_RESULTS_DIR / "wti_ridge_cv_results.csv",
         index=False,
     )
     zero_sensitivity.to_csv(
-        RESULTS_DIR / "wti_zero_output_model_sensitivity.csv",
+        WTI_RESULTS_DIR / "wti_zero_output_model_sensitivity.csv",
         index=False,
     )
     error_by_state.to_csv(
-        RESULTS_DIR / "wti_model_error_by_state.csv",
+        WTI_RESULTS_DIR / "wti_model_error_by_state.csv",
         index=False,
     )
     primary_predictions.to_csv(
@@ -846,8 +896,12 @@ def main():
         index=False,
     )
 
-    alcu_pca = pd.read_csv(RESULTS_DIR / "alcu_pca_monitoring_summary.csv").iloc[0]
-    alcu_vm = pd.read_csv(RESULTS_DIR / "alcu_virtual_metrology_metrics.csv")
+    alcu_pca = pd.read_csv(
+        ALCU_RESULTS_DIR / "alcu_pca_monitoring_summary.csv"
+    ).iloc[0]
+    alcu_vm = pd.read_csv(
+        ALCU_RESULTS_DIR / "alcu_virtual_metrology_metrics.csv"
+    )
     comparison_rows = []
     for process, process_pca, process_vm in [
         ("AlCu", alcu_pca, alcu_vm),
@@ -858,11 +912,24 @@ def main():
             & process_vm["zero_output_treatment"].eq("excluded")
             & process_vm["model"].eq("Random Forest")
         ].iloc[0]
-        grouped_rf = process_vm.loc[
+        grouped_candidates = process_vm.loc[
             process_vm["validation"].eq("identical-target-profile sensitivity")
             & process_vm["zero_output_treatment"].eq("excluded")
             & process_vm["model"].eq("Random Forest")
-        ].iloc[0]
+        ]
+        grouped_rf = (
+            grouped_candidates.iloc[0] if not grouped_candidates.empty else None
+        )
+        grouped_rmse = (
+            float(grouped_rf["aggregate_rmse_17_targets"])
+            if grouped_rf is not None
+            else np.nan
+        )
+        grouped_r2 = (
+            float(grouped_rf["aggregate_r2_17_targets"])
+            if grouped_rf is not None
+            else np.nan
+        )
         comparison_rows.append(
             {
                 "process": process,
@@ -884,21 +951,17 @@ def main():
                 "primary_random_forest_r2": float(
                     primary_rf["aggregate_r2_17_targets"]
                 ),
-                "grouped_random_forest_rmse": float(
-                    grouped_rf["aggregate_rmse_17_targets"]
-                ),
-                "grouped_random_forest_r2": float(
-                    grouped_rf["aggregate_r2_17_targets"]
-                ),
+                "grouped_random_forest_rmse": grouped_rmse,
+                "grouped_random_forest_r2": grouped_r2,
                 "grouped_minus_primary_rmse": float(
-                    grouped_rf["aggregate_rmse_17_targets"]
+                    grouped_rmse
                     - primary_rf["aggregate_rmse_17_targets"]
                 ),
             }
         )
     comparison = pd.DataFrame(comparison_rows)
     comparison.to_csv(
-        RESULTS_DIR / "cross_process_workflow_comparison.csv",
+        COMPARISON_RESULTS_DIR / "cross_process_workflow_comparison.csv",
         index=False,
     )
 
@@ -927,7 +990,7 @@ def main():
         "aggregate_rmse_17_targets",
         "aggregate_r2_17_targets",
     ]
-    print("Separately fitted WTi validation workflow complete.")
+    print("Separately fitted WTi replication workflow complete.")
     print(pca_summary.to_string(index=False))
     print()
     print(metrics[display_columns].to_string(index=False))

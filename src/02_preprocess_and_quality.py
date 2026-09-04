@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 RAW_DIR = PROJECT_DIR / "data" / "raw"
 PROCESSED_DIR = PROJECT_DIR / "data" / "processed"
-RESULTS_DIR = PROJECT_DIR / "results"
+AUDIT_RESULTS_DIR = PROJECT_DIR / "results" / "audit"
 FIGURES_DIR = PROJECT_DIR / "figures"
 
 RANDOM_STATE = 42
@@ -256,7 +256,7 @@ def plot_quality_distributions(process_metrics):
 
 def main():
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    AUDIT_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
     quality_summary_rows = []
@@ -304,8 +304,11 @@ def main():
 
     quality_summary = pd.DataFrame(quality_summary_rows)
     split_summary = pd.DataFrame(split_summary_rows)
-    quality_summary.to_csv(RESULTS_DIR / "quality_metric_summary.csv", index=False)
-    split_summary.to_csv(RESULTS_DIR / "split_summary.csv", index=False)
+    quality_summary.to_csv(
+        AUDIT_RESULTS_DIR / "quality_metric_summary.csv",
+        index=False,
+    )
+    split_summary.to_csv(AUDIT_RESULTS_DIR / "split_summary.csv", index=False)
     plot_quality_distributions(process_metrics)
 
     print()

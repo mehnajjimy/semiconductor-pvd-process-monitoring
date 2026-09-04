@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 RAW_DIR = PROJECT_DIR / "data" / "raw"
 PROCESSED_DIR = PROJECT_DIR / "data" / "processed"
-RESULTS_DIR = PROJECT_DIR / "results"
+ALCU_RESULTS_DIR = PROJECT_DIR / "results" / "alcu"
 FIGURES_DIR = PROJECT_DIR / "figures"
 
 PROCESS = "AlCu"
@@ -229,6 +229,8 @@ def plot_process_state_map(monitoring_scores):
 
 
 def main():
+    ALCU_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
     process_inputs = pd.read_csv(RAW_DIR / "X_pvd_AlCu.csv")
     assignments = pd.read_csv(PROCESSED_DIR / "alcu_split_assignments.csv")
     feature_screening = pd.read_csv(PROCESSED_DIR / "alcu_feature_screening.csv")
@@ -304,7 +306,10 @@ def main():
             <= retained_component_count,
         }
     )
-    component_table.to_csv(RESULTS_DIR / "alcu_pca_explained_variance.csv", index=False)
+    component_table.to_csv(
+        ALCU_RESULTS_DIR / "alcu_pca_explained_variance.csv",
+        index=False,
+    )
 
     alarm_counts = (
         monitoring_scores.groupby(["primary_split", "alarm_category"], observed=False)
@@ -315,7 +320,10 @@ def main():
     alarm_counts["share_within_split"] = alarm_counts["observations"] / alarm_counts.groupby(
         "primary_split"
     )["observations"].transform("sum")
-    alarm_counts.to_csv(RESULTS_DIR / "alcu_alarm_category_counts.csv", index=False)
+    alarm_counts.to_csv(
+        ALCU_RESULTS_DIR / "alcu_alarm_category_counts.csv",
+        index=False,
+    )
 
     summary = pd.DataFrame(
         [
@@ -339,7 +347,10 @@ def main():
             }
         ]
     )
-    summary.to_csv(RESULTS_DIR / "alcu_pca_monitoring_summary.csv", index=False)
+    summary.to_csv(
+        ALCU_RESULTS_DIR / "alcu_pca_monitoring_summary.csv",
+        index=False,
+    )
 
     zero_output_monitoring = monitoring_scores.loc[
         monitoring_scores["all_zero_output"],
@@ -354,7 +365,7 @@ def main():
         ],
     ]
     zero_output_monitoring.to_csv(
-        RESULTS_DIR / "alcu_zero_output_monitoring.csv",
+        ALCU_RESULTS_DIR / "alcu_zero_output_monitoring.csv",
         index=False,
     )
 

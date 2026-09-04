@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 RAW_DIR = PROJECT_DIR / "data" / "raw"
 PROCESSED_DIR = PROJECT_DIR / "data" / "processed"
-RESULTS_DIR = PROJECT_DIR / "results"
+ALCU_RESULTS_DIR = PROJECT_DIR / "results" / "alcu"
 FIGURES_DIR = PROJECT_DIR / "figures"
 
 RANDOM_STATE = 42
@@ -114,6 +114,13 @@ def plot_contribution_panel(axis, contribution_table, observation_index, statist
 
 
 def plot_excursion_contributions(contribution_table, selected_excursions):
+    def diagnostic_scope(observation_index):
+        split = selected_excursions.loc[
+            selected_excursions["observation_index"].eq(observation_index),
+            "primary_split",
+        ].iat[0]
+        return "training diagnostic" if split == "train" else "held-out diagnostic"
+
     t2_index = int(
         selected_excursions.loc[
             selected_excursions["alarm_category"].eq("t2 alarm only"),
@@ -139,28 +146,32 @@ def plot_excursion_contributions(contribution_table, selected_excursions):
         contribution_table,
         t2_index,
         "T2",
-        f"T²-Only Excursion {t2_index}: Signed T² Terms",
+        f"T²-Only Excursion {t2_index} ({diagnostic_scope(t2_index)})\n"
+        "Signed T² Terms",
     )
     plot_contribution_panel(
         axes[0, 1],
         contribution_table,
         q_index,
         "Q",
-        f"Q-Only Excursion {q_index}: Squared Residual Terms",
+        f"Q-Only Excursion {q_index} ({diagnostic_scope(q_index)})\n"
+        "Squared Residual Terms",
     )
     plot_contribution_panel(
         axes[1, 0],
         contribution_table,
         both_index,
         "T2",
-        f"Both-Alarm Excursion {both_index}: Signed T² Terms",
+        f"Both-Alarm Excursion {both_index} ({diagnostic_scope(both_index)})\n"
+        "Signed T² Terms",
     )
     plot_contribution_panel(
         axes[1, 1],
         contribution_table,
         both_index,
         "Q",
-        f"Both-Alarm Excursion {both_index}: Squared Residual Terms",
+        f"Both-Alarm Excursion {both_index} ({diagnostic_scope(both_index)})\n"
+        "Squared Residual Terms",
     )
     figure.suptitle(
         "AlCu Measurement Channels Prioritized for Engineering Review",
@@ -332,7 +343,8 @@ def plot_quality_by_state(combined):
 
     figure.suptitle(
         "AlCu Released-Scale Output Summaries by Process State\n"
-        "All-zero output record excluded; categories are descriptive",
+        "All valid training and held-out observations; all-zero target record "
+        "excluded",
         fontsize=13,
     )
     figure.tight_layout()
@@ -345,6 +357,8 @@ def plot_quality_by_state(combined):
 
 
 def main():
+    ALCU_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
     process_inputs = pd.read_csv(RAW_DIR / "X_pvd_AlCu.csv")
     monitoring = pd.read_csv(PROCESSED_DIR / "alcu_monitoring_scores.csv")
     quality_metrics = pd.read_csv(PROCESSED_DIR / "alcu_quality_metrics.csv")
@@ -380,23 +394,23 @@ def main():
         "q_ratio",
     ]
     selected_excursions[selected_columns].to_csv(
-        RESULTS_DIR / "alcu_selected_excursions.csv",
+        ALCU_RESULTS_DIR / "alcu_selected_excursions.csv",
         index=False,
     )
     contributions.to_csv(
-        RESULTS_DIR / "alcu_excursion_contributions.csv",
+        ALCU_RESULTS_DIR / "alcu_excursion_contributions.csv",
         index=False,
     )
     quality_summary.to_csv(
-        RESULTS_DIR / "alcu_quality_by_alarm_category.csv",
+        ALCU_RESULTS_DIR / "alcu_quality_by_alarm_category.csv",
         index=False,
     )
     held_out_comparisons.to_csv(
-        RESULTS_DIR / "alcu_held_out_quality_comparison.csv",
+        ALCU_RESULTS_DIR / "alcu_held_out_quality_comparison.csv",
         index=False,
     )
     zero_sensitivity.to_csv(
-        RESULTS_DIR / "alcu_zero_record_quality_sensitivity.csv",
+        ALCU_RESULTS_DIR / "alcu_zero_record_quality_sensitivity.csv",
         index=False,
     )
 
