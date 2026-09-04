@@ -1,8 +1,6 @@
 # Multivariate PVD Process Monitoring and Virtual Metrology
 
-**Status:** Pre-audit v0.9. Run the independent review in
-`report/independent_audit_prompt.md` before public release. The audited and
-corrected public release should become v1.0.
+**Status:** Pre-audit v0.9. 
 
 This project turns approximately 100 anonymized PVD process measurements into a
 compact retrospective monitoring workflow. AlCu is the primary analysis. WTi is
