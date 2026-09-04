@@ -2,19 +2,18 @@
 
 **Release:** v1.0
 
-This project uses anonymized PVD process measurements to build a retrospective
-process-state monitoring and virtual-metrology workflow. AlCu is the primary
-analysis. WTi repeats the same workflow with models fitted only on WTi data.
+This project uses anonymized physical vapor deposition (PVD) process data to
+build a retrospective multivariate process-state monitoring and virtual
+metrology workflow. AlCu is the primary analysis, while WTi is a separately
+fitted replication of the same workflow.
 
-The project is meant to answer practical process-engineering questions: Can a
-large set of correlated measurements be reduced to a smaller monitoring view?
-Which anonymous channels should be reviewed first after a statistical
-excursion? How well can the process inputs predict all 17 released target
-measurements?
+The analysis reduces correlated process inputs to a smaller monitoring view,
+ranks anonymous channels for excursion review, and predicts all 17 released
+target measurements directly.
 
 ## Data
 
-The source is Infineon's public
+The data come from Infineon's public
 [Advanced Process Control and Statistical Process Control Data for Thickness Prediction of AlCu and WTi Metal Layer in Semiconductor Manufacturing](https://doi.org/10.5281/zenodo.16881338).
 
 | Process | Input columns | Released targets | Rows |
@@ -22,36 +21,36 @@ The source is Infineon's public
 | AlCu | 97 | 17 | 4,848 |
 | WTi | 108 | 17 | 1,740 |
 
-The four local CSV files are unchanged copies of the published release. They
-match the official MD5 checksums and are ignored by Git. The dataset is licensed
-under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); its authors are
+The four local CSV files are unchanged copies of the release and match its MD5
+checksums. They are ignored by Git. The dataset is licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) and was published by
 Amina Mević, Andreas Laber, and Senka Krivić. Download instructions and
 checksums are in [`data/raw/README.md`](data/raw/README.md).
 
-The release does not provide physical units, inverse scaling, timestamps,
+The release does not include physical units, inverse scaling, timestamps,
 equipment identifiers, measurement-point coordinates, specifications, or fault
-labels. I therefore report released-scale quantities only. The derived mean
+labels. All reported quantities remain on the released scale. The derived mean
 index and reference-profile deviation are engineering summaries, not physical
 thickness or physical uniformity.
 
-## Workflow
+## Method
 
-1. Check file identity, shapes, missing values, duplicates, and X/Y row counts.
-2. Use a fixed 80/20 split as the primary validation. Run a second split grouped
-   by exactly equal target profiles as a sensitivity check. Equal target
-   profiles are not assumed to be duplicate wafers.
-3. Keep each all-zero target record in process-state monitoring, exclude it from
-   primary Y-based modeling, and run explicit with/without sensitivity checks.
-4. Fit training-only standardization and PCA. Retain the smallest PCA model that
-   reaches 90% explained variance, then calculate Hotelling T² and Q/SPE.
-5. Use the training-set 99th percentiles as empirical alert thresholds and rank
-   channel contributions for selected excursions.
-6. Predict the 17 released targets directly with multi-output Linear Regression
-   and Ridge. Add one fixed Random Forest because it passes a predeclared
-   training-only improvement gate. Each split has its own gate; only the primary
-   AlCu gate transfers the Random Forest configuration to WTi.
+- Audit file identity, shapes, missing values, duplicates, and X/Y row counts.
+- Use a fixed 80/20 split for primary validation, then repeat validation with
+  exactly equal target profiles kept together. Equal profiles are not assumed
+  to be duplicate wafers.
+- Keep all-zero target records in process-state monitoring, exclude them from
+  primary Y-based modeling, and run with/without sensitivity checks. Their
+  meaning is unknown.
+- Fit standardization and PCA on training data only. Retain the fewest
+  components that explain at least 90% of variance, then calculate Hotelling T²
+  and Q/SPE with training-set 99th-percentile empirical alert thresholds.
+- Predict the 17 targets with multi-output Linear Regression and Ridge. A fixed
+  Random Forest is included because it passes a predeclared, training-only
+  improvement gate. Each validation split has its own gate; only the primary
+  AlCu gate transfers the model configuration to WTi.
 
-## Main results
+## Results
 
 | Result | AlCu | WTi |
 |---|---:|---:|
@@ -63,44 +62,37 @@ thickness or physical uniformity.
 | Random Forest aggregate R² | 0.622 | 0.604 |
 | Grouped-sensitivity Random Forest RMSE | 0.00926 | 0.00767 |
 
-The AlCu grouped split increased Random Forest RMSE by 6.4% and reduced
-aggregate R² from 0.622 to 0.543. The ordinary split is somewhat optimistic,
-but the grouped result still contains useful released-scale predictive signal.
-The WTi grouped result improved instead of degrading. AlCu and WTi RMSE values
-belong to different released scales, so they are not a physical ranking of the
-two processes.
+For AlCu, grouping identical target profiles increased Random Forest RMSE by
+6.4% and reduced aggregate R² from 0.622 to 0.543. The ordinary split is
+somewhat optimistic, but the grouped result retains useful released-scale
+predictive signal. WTi improved under the grouped split. Because the two
+processes use different released scales, their errors are not a physical
+ranking.
 
-For AlCu, the 11 valid alerted assessment rows had a released mean-index
-difference of -0.00610 from the 959 normal rows. The clustered 95% interval was
-[-0.01355, 0.00071]. The reference-profile deviation difference was +0.00270
-with an interval of [-0.00111, 0.00643]. Both intervals cross zero, so this
-dataset does not establish a clear released-output shift for alerted rows.
-
-The primary AlCu Random Forest had mean row MAE of 0.00611 for normal rows and
-0.01263 for both-alarm rows. The both-alarm group contains only four rows. This
-is a useful reliability check, but it is too small to support a production rule.
-Aggregate and per-target model errors are listed in the
-[`results/` guide](results/README.md).
+The AlCu alerted-versus-normal output comparisons did not establish a clear
+released-output shift: both clustered 95% intervals crossed zero. Only four
+assessment rows triggered both T² and Q/SPE alarms, so their larger prediction
+error is descriptive rather than a production rule. Aggregate and per-target
+errors are listed in the [`results/` guide](results/README.md).
 
 ## Engineering figures
 
 ![AlCu retrospective process-state map](figures/05_alcu_process_state_map.png)
 
-T² measures distance within the retained PCA space. Q/SPE measures variation
-that the retained PCA model does not reconstruct well. The categories form a
-review queue; they are not fault labels.
+T² and Q/SPE provide complementary statistical excursion views; the categories
+are review priorities, not fault labels.
 
 ![AlCu excursion contribution plots](figures/06_alcu_excursion_contributions.png)
 
-Contribution plots shorten the channel-review list for selected excursions.
-They do not prove physical causation because the sensor names and equipment
-context are unavailable.
+Contribution plots identify anonymous channels to review first. They do not
+establish physical causation.
 
-![AlCu direct 17-target predictions](figures/08_alcu_virtual_metrology_predictions.png)
+![AlCu direct 17-target virtual metrology predictions](figures/08_alcu_virtual_metrology_predictions.png)
 
-![AlCu and separately fitted WTi comparison](figures/13_cross_process_workflow_comparison.png)
+The held-out predictions cover all 17 released targets directly; the mean index
+is shown only as a secondary engineering summary.
 
-## Run the analysis
+## Reproduce
 
 Place the four downloaded CSV files in `data/raw/`, then run:
 
@@ -117,32 +109,19 @@ python src/05_virtual_metrology.py
 python src/06_wti_validation.py
 ```
 
-The scripts are numbered because later stages read outputs from earlier ones.
-There is no notebook, dashboard, or package framework.
+The numbered scripts run in sequence because later stages read earlier outputs.
 
-```text
-data/raw/           local unchanged source CSVs, ignored by Git
-data/processed/     generated splits, scores, and row-level predictions
-src/                six analysis scripts
-figures/            generated figures
-results/audit/      checks and split summaries
-results/alcu/       primary analysis tables
-results/wti/        separately fitted WTi tables
-results/comparison/ cross-process workflow summary
-report/             concise technical report
-```
+## Limits
 
-## Limits on interpretation
-
-- X/Y pairing is positional because the release contains no join key.
-- There is no chronology or known-good baseline. The work is retrospective
-  multivariate process-state monitoring, not formal chronological SPC.
-- The 99th-percentile cutoffs are empirical alert thresholds, not validated
-  control limits or independently calibrated false-alarm limits.
-- There are no specifications for Cp or Cpk and no fault labels for validated
-  fault detection.
-- One all-zero target row occurs in each process, and its meaning is unknown.
+- X/Y pairing is positional because the release provides no join key.
+- With no chronology or known-good baseline, this is retrospective multivariate
+  process-state monitoring, not formal chronological SPC.
+- The thresholds are empirical alerts, not validated control limits or
+  independently calibrated false-alarm limits.
+- Missing specifications prevent Cp/Cpk analysis, and missing fault labels
+  prevent validated fault detection.
 - WTi is a second released process dataset, not an external fab qualification.
 
-See [`report/technical_report.md`](report/technical_report.md) for the technical
-discussion and [`results/README.md`](results/README.md) for the result tables.
+See the concise [`technical report`](report/technical_report.md) for the full
+method and interpretation, or the [`results/` guide](results/README.md) for the
+main tables and supporting sensitivity outputs.

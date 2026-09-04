@@ -2,133 +2,109 @@
 
 **Technical report, release v1.0**
 
-## 1. Purpose and data
+## 1. Scope and data
 
-PVD process records can contain many correlated measurements. Reviewing every
-channel separately makes it harder to see the process state as a whole. I used
-PCA, Hotelling T², Q/SPE, contribution analysis, and multi-output regression to
-build one compact retrospective workflow. AlCu is the primary analysis. WTi is
-a separately fitted replication on a second released process dataset.
+This project tests whether anonymized PVD process measurements can support a
+compact process-state view and direct prediction of 17 released target
+measurements. AlCu is the primary analysis. WTi repeats the workflow with models
+fitted only on WTi data.
 
 The data come from Infineon's public
 [PVD APC/SPC dataset](https://doi.org/10.5281/zenodo.16881338) and its
-[associated paper](https://doi.org/10.3233/FAIA251482). The four CSV files in my
-local analysis are unchanged copies of the release and match its published MD5
-checksums. The dataset authors are Amina Mević, Andreas Laber, and Senka Krivić,
-and the release uses the
-[CC BY 4.0 license](https://creativecommons.org/licenses/by/4.0/).
+[associated paper](https://doi.org/10.3233/FAIA251482). My four local CSV files
+are unchanged copies of the release and match its published MD5 checksums. The
+dataset authors are Amina Mević, Andreas Laber, and Senka Krivić, and the files
+use the [CC BY 4.0 license](https://creativecommons.org/licenses/by/4.0/).
 
-| Process | Input matrix | Target matrix |
-|---|---:|---:|
-| AlCu | 4,848 × 97 | 4,848 × 17 |
-| WTi | 1,740 × 108 | 1,740 × 17 |
+| Process | Inputs | Released targets | Rows |
+|---|---:|---:|---:|
+| AlCu | 97 | 17 | 4,848 |
+| WTi | 108 | 17 | 1,740 |
 
-All columns are numeric. The audit found no missing or nonfinite values, exact
-duplicate X rows, duplicate X columns, or exact duplicate combined X/Y rows.
-The release has no join key, so X/Y pairing depends on the published row order.
+The audit found no missing or nonfinite cells, exact duplicate X rows, duplicate
+X columns, or exact duplicate combined X/Y rows. X/Y pairing is positional
+because the release has no join key.
 
-Exact target profiles repeat. AlCu has 1,203 rows that repeat an earlier target
-profile, while WTi has 93. Different X rows with an equal Y profile are not
-proven duplicates. I kept a normal fixed 80/20 split as the primary validation
-and used a grouped-by-exact-target-profile split only as a sensitivity check.
+Physical units, inverse scaling, point coordinates, timestamps, equipment
+identifiers, specifications, and fault labels are unavailable. All results stay
+on the released scale. The mean index and reference-profile deviation used
+below are statistical summaries, not physical thickness or physical uniformity.
 
-Training-only screening removed `Sensor_26` and `Sensor_63` from AlCu because
-one value occurs in at least 98% of the primary training rows. The model keeps
-the other 95 AlCu inputs and all 108 WTi inputs.
+## 2. Validation decisions
 
-The release does not supply physical units, an inverse scale, measurement-point
-coordinates, timestamps, tools, chambers, recipes, specifications, known-good
-labels, or fault labels. Every result in this report stays on the released
-scale. The mean index and reference-profile deviation are statistical summaries
-and are not physical thickness or physical uniformity.
+The primary validation is a fixed 80/20 random split using seed 42. A second
+split keeps exactly equal 17-target profiles together. It is a sensitivity
+check, not the primary result. Equal Y profiles are not assumed to be duplicate
+wafers even though 1,203 AlCu rows and 93 WTi rows repeat an earlier profile.
 
-## 2. Validation and unknown zero records
+Training-only feature screening removes `Sensor_26` and `Sensor_63` from AlCu
+because one value occurs in at least 98% of the training rows. The remaining 95
+AlCu inputs and all 108 WTi inputs are retained.
 
-The primary split uses random seed 42. All data-dependent preprocessing is fit
-on the applicable training rows. Ridge tuning uses five-fold training-only
-cross-validation with scaling inside each fold. The grouped sensitivity also
-uses grouped folds, which keep exactly equal target profiles together.
+Each process has one all-zero target row: zero-based AlCu index 2,586 and WTi
+index 936. Their meaning is unknown. They remain in X-based process-state
+monitoring, are excluded from primary Y summaries and models, and are added back
+only for explicit sensitivity checks.
 
-One all-zero 17-target row occurs in each process: zero-based AlCu index 2,586
-and WTi index 936. The dataset does not explain these records, so I do not assign
-them a physical or operational meaning. Both remain in X-based process-state
-monitoring. They are excluded from primary Y summaries and models, then added
-back only for the reported sensitivity checks.
+## 3. Process-state monitoring
 
-## 3. Retrospective multivariate monitoring
+Inputs are standardized using ordinary training rows. PCA is then fit on those
+rows, retaining the smallest model that reaches 90% explained variance.
 
-I standardized the retained process inputs with ordinary training-row means and
-standard deviations. A full PCA was then fit on those rows, and I kept the
-smallest number of components that reached 90% cumulative explained variance.
-
-| Process | Model inputs | Retained PCs | Retained variance |
+| Process | Model inputs | Retained PCs | Variance retained |
 |---|---:|---:|---:|
 | AlCu | 95 | 34 | 90.55% |
 | WTi | 108 | 35 | 90.16% |
 
-For PCA score vector `t` and retained eigenvalues `λ`, Hotelling T² is the sum
-of `t²/λ`. It measures distance from the training center within the retained
-PCA space. Q/SPE is the squared reconstruction residual. It measures process
-variation that the retained space does not reconstruct well.
-
-The alert thresholds are the 99th percentiles of the corresponding ordinary
-training statistics. They are empirical thresholds, not formal chronological
-SPC control limits.
+Hotelling T² measures distance within the retained PCA space. Q/SPE measures
+the squared variation that the retained model does not reconstruct. Their
+thresholds are the 99th percentiles of the ordinary training statistics.
 
 | Process | T² threshold | Q threshold | Assessment alerts |
 |---|---:|---:|---:|
 | AlCu | 258.819 | 60.379 | 11/970 (1.13%) |
 | WTi | 419.905 | 60.568 | 15/348 (4.31%) |
 
-Each row is placed into one of four descriptive states: normal, T²-only,
-Q-only, or both-alarm. This gives an engineer a short review queue. It does not
-identify a validated fault.
+These are empirical alert thresholds for retrospective multivariate
+process-state monitoring. They are not formal chronological SPC control limits
+or validated fault rules.
 
-## 4. AlCu excursion review
+Three AlCu examples were selected by taking the largest threshold ratio from
+each non-normal category:
 
-Three AlCu rows were selected by a fixed rule: the largest threshold ratio in
-each non-normal category. Two are training diagnostics and one is held out.
-
-| Zero-based row | Split role | State | T²/threshold | Q/threshold |
+| Row | Role | State | T²/threshold | Q/threshold |
 |---:|---|---|---:|---:|
 | 1,113 | training diagnostic | T²-only | 14.70 | 0.14 |
 | 6 | training diagnostic | Q-only | 0.44 | 3.77 |
 | 139 | held-out diagnostic | both-alarm | 180.71 | 1,568.71 |
 
-Q contributions are squared standardized residuals and add to Q. Signed T²
-terms also add to T², but correlated channels make them diagnostic rather than
-unique causal effects. For index 1,113, the leading T² channels include
-`Sensor_53`, `Sensor_56`, and `Sensor_73`. For index 6, the leading Q channels
-include `Sensor_13`, `Sensor_97`, and `Sensor_46`. `Sensor_35` and `Sensor_54`
-rank prominently for both statistics at index 139. These are channels to inspect
-first, not named root causes.
+Contribution terms point to channels for review. `Sensor_53`, `Sensor_56`, and
+`Sensor_73` lead the first case; `Sensor_13`, `Sensor_97`, and `Sensor_46` lead
+the second. `Sensor_35` and `Sensor_54` rank prominently for the held-out case.
+These rankings are diagnostic and do not prove physical root cause.
 
-I also compared valid normal and alerted rows in the ordinary AlCu assessment
-set. Exact target-profile groups were resampled together in a 2,000-sample
-bootstrap.
+For the valid AlCu assessment rows, exact target-profile groups were resampled
+together in a 2,000-sample bootstrap:
 
 | Released-scale summary | Alert minus normal mean | Clustered 95% interval |
 |---|---:|---:|
 | Mean index | -0.00610 | [-0.01355, 0.00071] |
 | Reference-profile deviation | +0.00270 | [-0.00111, 0.00643] |
 
-Both intervals include zero. The 11 alerted rows do not establish a clear shift
-in either summary. The small alert group also limits precision.
+Both intervals include zero. The 11 alerted rows do not establish a clear
+released-output shift.
 
-## 5. Direct 17-target virtual metrology
+## 4. Direct virtual metrology
 
 The primary prediction task estimates all 17 released targets directly. Linear
-Regression and Ridge are required baselines. The optional Random Forest uses
-300 trees, a minimum leaf size of 5, 70% of features per split, and seed 42.
+Regression and Ridge are required baselines. Ridge tuning uses training-only
+five-fold cross-validation with scaling inside each fold.
 
-Random Forest is admitted without using assessment rows. On the ordinary AlCu
-training folds, seeds 11, 42, and 73 improve mean RMSE over Ridge by 39.0% to
-39.2%. That gate controls the primary AlCu result and the configuration later
-used for WTi. A separate grouped-training gate improves RMSE by 34.0% to 34.2%
-and controls only the grouped AlCu sensitivity result. The two held-out sets do
-not participate in each other's model admission.
-
-### Aggregate ordinary-split errors
+One Random Forest is retained: 300 trees, minimum leaf size 5, 70% of features
+per split, and seed 42. Seeds 11, 42, and 73 improve ordinary training-fold RMSE
+over Ridge by 39.0% to 39.2%. This ordinary gate controls the primary AlCu model
+and the configuration passed to WTi. A separate grouped-training gate controls
+only the grouped AlCu result. Neither held-out set affects the other gate.
 
 | Process | Model | MAE | RMSE | Aggregate R² |
 |---|---|---:|---:|---:|
@@ -139,12 +115,16 @@ not participate in each other's model admission.
 | WTi | Ridge | 0.00721 | 0.01458 | -0.172 |
 | WTi | Random Forest | 0.00519 | 0.00829 | 0.604 |
 
-The large Linear Regression RMSE values come from rare, high-error predictions.
-Negative R² means the fitted model performs worse than the target-wise mean
-benchmark on that assessment set. Random Forest gives the clearest and most
-stable improvement, which is why it is retained as the final nonlinear model.
+Negative R² means the model performs worse than a target-wise mean benchmark.
+Rare large errors drive the poor Linear Regression RMSE. Random Forest gives a
+clearer and more stable result.
 
-### Random Forest error by released target
+The grouped sensitivity changes AlCu Random Forest RMSE from 0.00870 to 0.00926
+and R² from 0.622 to 0.543. WTi changes from 0.00829 and 0.604 to 0.00767 and
+0.690. Repeated profiles add some optimism to the ordinary AlCu score, but the
+grouped result retains useful released-scale signal.
+
+### Random Forest error by target
 
 | Target | AlCu MAE | AlCu RMSE | WTi MAE | WTi RMSE |
 |---:|---:|---:|---:|---:|
@@ -166,71 +146,47 @@ stable improvement, which is why it is retained as the final nonlinear model.
 | 16 | 0.00690 | 0.00975 | 0.00653 | 0.01010 |
 | 17 | 0.00537 | 0.00744 | 0.00573 | 0.00886 |
 
-AlCu per-target R² ranges from 0.517 to 0.823. WTi ranges from 0.488 to
-0.758. Full-precision values are in the AlCu and WTi per-target CSV files under
-[`results/`](../results/README.md).
+Full-precision MAE, RMSE, and R² values are in the per-target CSV files listed
+in the [`results/` guide](../results/README.md).
 
-The grouped sensitivity gives a more conservative AlCu result:
+For AlCu, mean row MAE rises from 0.00611 for normal rows to 0.01263 for the
+four both-alarm rows. This is worth reviewing, but the subgroup is too small for
+a production reliability rule.
 
-| Process | Ordinary RMSE / R² | Grouped RMSE / R² | RMSE change |
-|---|---:|---:|---:|
-| AlCu | 0.00870 / 0.622 | 0.00926 / 0.543 | +6.4% |
-| WTi | 0.00829 / 0.604 | 0.00767 / 0.690 | -7.5% |
+## 5. WTi replication and zero sensitivity
 
-Repeated profiles add some optimism to the ordinary AlCu score, but they do not
-explain the full predictive result. The WTi grouped score improves. This is one
-alternate split for each process, so it is a sensitivity result rather than a
-general guarantee.
+The WTi scaler, PCA model, thresholds, Ridge penalty, and final fits use WTi
+training data. The script verifies that its Random Forest configuration matches
+the model admitted by the ordinary AlCu training-only gate before refitting it.
 
-For the primary AlCu Random Forest, normal rows have mean row MAE of 0.00611.
-The T²-only, Q-only, and both-alarm means are 0.00644, 0.00794, and 0.01263.
-The both-alarm group has four rows. The pattern is worth checking during review,
-but the subgroup is too small for a reliability threshold.
+WTi's 14 alerted valid assessment rows have a mean-index difference of +0.00186
+from normal rows, with a clustered 95% interval of [-0.00420, 0.00768]. Its
+reference-profile deviation interval also crosses zero.
 
-## 6. WTi replication and zero sensitivity
-
-The WTi scaler, PCA model, empirical thresholds, Ridge penalty, and model fits
-use WTi training data. An AlCu-fitted estimator is never applied to WTi. The
-script verifies that the Random Forest configuration matches the model admitted
-by the primary AlCu training-only gate before fitting it on WTi.
-
-WTi has 333 normal and 14 alerted valid rows in its ordinary assessment set.
-The alert-minus-normal mean-index difference is +0.00186 with a clustered 95%
-interval of [-0.00420, 0.00768]. The reference-profile deviation difference is
-+0.00084 with an interval of [-0.00137, 0.00405]. These intervals also include
-zero.
-
-The all-zero sensitivity is strongest when the unknown row falls in assessment:
-
-| Process and split | Zero-row location | RF RMSE excluded | RF RMSE included |
+| Process and split | Zero location | RF RMSE excluded | RF RMSE included |
 |---|---|---:|---:|
 | AlCu ordinary | training | 0.008698 | 0.008715 |
 | AlCu grouped | assessment | 0.009258 | 0.020967 |
 | WTi ordinary | assessment | 0.008285 | 0.041549 |
 | WTi grouped | training | 0.007666 | 0.008124 |
 
-This confirms that the unexplained record can distort Y-based assessment. It
-does not explain why the record is zero.
+The unknown row has its largest effect when it appears in assessment. This
+supports excluding it from primary Y-based evaluation without assigning it a
+meaning.
 
-## 7. Limits and conclusion
+## 6. Limits and conclusion
 
-- The variables are anonymous, so channel rankings cannot be converted into
-  equipment diagnoses without process metadata.
-- There is no chronology or known-good period. The work is retrospective
-  multivariate process-state monitoring, not formal chronological SPC.
-- PCA fitting and empirical threshold estimation use the same training rows.
-  Alert rates are descriptive and not calibrated false-alarm rates.
-- No USL or LSL supports Cp or Cpk. No fault labels support validated fault
-  detection.
-- The released scales do not support physical AlCu-versus-WTi error ranking.
-- WTi is a second public process dataset, not an external production
-  qualification or a production-ready controller.
+- Anonymous variables cannot support named equipment diagnoses.
+- No chronology or known-good period supports formal SPC limits.
+- No specifications support Cp or Cpk, and no fault labels support validated
+  fault detection.
+- AlCu and WTi use different released scales, so their raw errors are not a
+  physical cross-process ranking.
+- WTi is a second public dataset, not an external fab qualification.
 
-The main result is a reproducible engineering workflow. PCA reduces each
-process to a smaller set of variation directions, T² and Q/SPE separate two
-types of statistical excursions, and contribution plots identify channels for
-review. The direct 17-target Random Forest retains useful released-scale
-predictive signal under both ordinary and grouped assessment. The evidence
-supports retrospective monitoring and virtual-metrology analysis on this
-release. It does not support physical metrology, formal control limits,
-validated fault detection, or production deployment.
+The project produces a reproducible retrospective monitoring and
+virtual-metrology workflow. PCA reduces the process inputs, T² and Q/SPE sort
+statistical excursions, and contribution plots prioritize channels for review.
+The Random Forest keeps useful 17-target predictive signal under both split
+designs. The results do not establish physical metrology, production control
+limits, validated faults, or production readiness.
