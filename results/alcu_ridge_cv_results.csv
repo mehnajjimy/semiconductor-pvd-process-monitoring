@@ -1,0 +1,25 @@
+validation,alpha,cross_validation_method,folds,mean_validation_rmse,standard_deviation_validation_rmse,maximum_validation_rmse,selected
+ordinary fixed split,0.01,shuffled 5-fold,5,0.354217424812567,0.6468105777799724,1.5064964201942859,False
+ordinary fixed split,0.1,shuffled 5-fold,5,0.32812401192655993,0.6700889024809105,1.5264259949761105,False
+ordinary fixed split,1.0,shuffled 5-fold,5,0.3167761501323152,0.6820625022846296,1.5368863300081468,False
+ordinary fixed split,10.0,shuffled 5-fold,5,0.31272227703069116,0.6745598601478459,1.5194101678855474,False
+ordinary fixed split,100.0,shuffled 5-fold,5,0.3009251182328369,0.6468745554419195,1.4580881772087515,False
+ordinary fixed split,1000.0,shuffled 5-fold,5,0.24267092142441626,0.5138742493290757,1.1619163512685005,False
+ordinary fixed split,10000.0,shuffled 5-fold,5,0.0881850193914889,0.16721586802631855,0.387309220016458,False
+ordinary fixed split,100000.0,shuffled 5-fold,5,0.022055907186238097,0.016856217060750755,0.052201851410376636,False
+ordinary fixed split,1000000.0,shuffled 5-fold,5,0.015331375416616347,0.00040969666171858263,0.015771030264361344,False
+ordinary fixed split,10000000.0,shuffled 5-fold,5,0.015314900282303747,0.00038269408260110905,0.015884941108159523,True
+ordinary fixed split,100000000.0,shuffled 5-fold,5,0.01533016642242189,0.00038063564595385057,0.015897026500565892,False
+ordinary fixed split,1000000000.0,shuffled 5-fold,5,0.015331865183837376,0.00038032805321287343,0.01589824240138797,False
+identical-target-profile sensitivity,0.01,grouped 5-fold by exact target profile,5,2.3213814615202804,5.1288519267208255,11.495998167562588,False
+identical-target-profile sensitivity,0.1,grouped 5-fold by exact target profile,5,2.3144078493769533,5.115392768764798,11.464963689751448,False
+identical-target-profile sensitivity,1.0,grouped 5-fold by exact target profile,5,2.2714781781744104,5.028357877424819,11.266399129984912,False
+identical-target-profile sensitivity,10.0,grouped 5-fold by exact target profile,5,2.217719016067943,4.928179152169554,11.033508502678934,False
+identical-target-profile sensitivity,100.0,grouped 5-fold by exact target profile,5,2.1561804825068327,4.796172900255145,10.735835332573881,False
+identical-target-profile sensitivity,1000.0,grouped 5-fold by exact target profile,5,1.5703339176756332,3.483577921155915,7.801947426674071,False
+identical-target-profile sensitivity,10000.0,grouped 5-fold by exact target profile,5,0.5413385968404175,1.1806602029700302,2.653367348211201,False
+identical-target-profile sensitivity,100000.0,grouped 5-fold by exact target profile,5,0.0893885920801581,0.16728332165157905,0.3886314349322857,False
+identical-target-profile sensitivity,1000000.0,grouped 5-fold by exact target profile,5,0.02094245559080492,0.012571886179323567,0.04339882799525828,False
+identical-target-profile sensitivity,10000000.0,grouped 5-fold by exact target profile,5,0.015494581617274766,0.0006844740913590004,0.01626744371097914,False
+identical-target-profile sensitivity,100000000.0,grouped 5-fold by exact target profile,5,0.01543228303553527,0.0006790066382718913,0.016279363399529404,True
+identical-target-profile sensitivity,1000000000.0,grouped 5-fold by exact target profile,5,0.015436086782705475,0.0006784707688507455,0.016280562517666537,False

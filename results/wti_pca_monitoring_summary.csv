@@ -1,0 +1,2 @@
+process,input_features,model_features,reference_rows,assessment_rows,retained_components,retained_explained_variance,t2_empirical_quantile,t2_threshold,q_empirical_quantile,q_threshold,assessment_any_alarm_rate
+WTi,108,108,1392,348,35,0.9015744970674607,0.99,419.90525547763235,0.99,60.56772930496717,0.04310344827586207

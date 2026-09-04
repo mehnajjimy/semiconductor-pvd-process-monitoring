@@ -1,0 +1,9 @@
+primary_split,alarm_category,observations,share_within_split
+test,both alarms,4,0.004123711340206186
+test,normal,959,0.988659793814433
+test,q alarm only,2,0.002061855670103093
+test,t2 alarm only,5,0.005154639175257732
+train,both alarms,13,0.0033522434244455906
+train,normal,3813,0.983238782877772
+train,q alarm only,26,0.006704486848891181
+train,t2 alarm only,26,0.006704486848891181

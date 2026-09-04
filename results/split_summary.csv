@@ -1,0 +1,5 @@
+process,validation,train_rows,test_rows,test_share,target_profile_groups_in_both_sets,test_rows_with_profile_seen_in_train,zero_output_rows_in_train,zero_output_rows_in_test
+AlCu,ordinary fixed split,3878,970,0.20008250825082508,214,308,1,0
+AlCu,identical-target-profile sensitivity,3768,1080,0.22277227722772278,0,0,0,1
+WTi,ordinary fixed split,1392,348,0.2,24,28,0,1
+WTi,identical-target-profile sensitivity,1393,347,0.19942528735632184,0,0,1,0

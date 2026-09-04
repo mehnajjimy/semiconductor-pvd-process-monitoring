@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+.ipynb_checkpoints/
+.matplotlib-cache/
+
+# keep the verified published files locally and cite the official DOI
+data/raw/*.csv

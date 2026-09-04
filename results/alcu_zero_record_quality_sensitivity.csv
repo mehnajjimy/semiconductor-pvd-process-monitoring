@@ -1,0 +1,5 @@
+zero_output_treatment,metric,normal_observations,alarm_observations,normal_mean,alarm_mean,mean_difference_alarm_minus_normal,zero_output_has_defined_metric
+excluded,released_mean_index,4772,75,0.6125111590251214,0.6119209671997997,-0.0005901918253217175,True
+excluded,reference_profile_shape_deviation,4772,75,0.013658270000267871,0.013513399488268997,-0.00014487051199887392,False
+included where metric is defined,released_mean_index,4772,76,0.6125111590251214,0.6038693755261181,-0.008641783499003353,True
+included where metric is defined,reference_profile_shape_deviation,4772,75,0.013658270000267871,0.013513399488268997,-0.00014487051199887392,False

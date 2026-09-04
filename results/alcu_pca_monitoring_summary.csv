@@ -1,0 +1,2 @@
+process,input_features,model_features,reference_rows,assessment_rows,retained_components,retained_explained_variance,t2_empirical_quantile,t2_threshold,q_empirical_quantile,q_threshold,assessment_any_alarm_rate
+AlCu,97,95,3878,970,34,0.9054594747749585,0.99,258.8188405579229,0.99,60.37935625873294,0.01134020618556701

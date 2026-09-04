@@ -1,0 +1,3 @@
+metric,normal_observations,alarm_observations,mean_difference_alarm_minus_normal,group_bootstrap_95_percent_lower,group_bootstrap_95_percent_upper,median_difference_alarm_minus_normal,bootstrap_samples_used
+released_mean_index,333,14,0.001862641077875593,-0.0042026422585982,0.007680955346048982,0.001384557911378037,2000
+reference_profile_shape_deviation,333,14,0.000839404660738073,-0.0013712834541536262,0.004053124145743127,0.0001115797757101503,2000

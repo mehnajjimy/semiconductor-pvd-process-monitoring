@@ -1,0 +1,5 @@
+validation,model,zero_output_location,ridge_alpha,excluded_training_rows,included_training_rows,excluded_assessment_rows,included_assessment_rows,excluded_aggregate_rmse,included_aggregate_rmse,rmse_change_included_minus_excluded
+ordinary fixed split,Ridge,test,1000.0,1392,1392,347,348,0.014580477106417805,0.040825734389875364,0.026245257283457557
+ordinary fixed split,Random Forest,test,,1392,1392,347,348,0.008284596349354025,0.04154899873743728,0.03326440238808326
+identical-target-profile sensitivity,Ridge,train,100000000000.0,1392,1393,347,347,0.014317602249773942,0.014359569207793438,4.196695801949625e-05
+identical-target-profile sensitivity,Random Forest,train,,1392,1393,347,347,0.007665619390219186,0.008124025103752808,0.0004584057135336222

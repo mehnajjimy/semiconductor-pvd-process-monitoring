@@ -1,0 +1,5 @@
+file,dataset,rows,columns,numeric_columns,missing_cells,nonfinite_cells,duplicate_rows,constant_columns,duplicate_columns,minimum,maximum,outside_zero_one,observed_md5,official_md5,official_checksum_match
+X_pvd_AlCu.csv,X_AlCu,4848,97,97,0,0,0,0,0,0.0,0.998668576591614,0,9dd4bfc44ffb6a570e519000e07e9fe8,9dd4bfc44ffb6a570e519000e07e9fe8,True
+Y_pvd_AlCu.csv,Y_AlCu,4848,17,17,0,0,1203,0,0,0.0,0.988479354163126,0,99b845acd32ae57060e194e407c08f19,99b845acd32ae57060e194e407c08f19,True
+X_pvd_WTi.csv,X_WTi,1740,108,108,0,0,0,0,0,0.0,0.9915657047192156,0,cfc27ea3bdf780bcdf6dfdc5711836c1,cfc27ea3bdf780bcdf6dfdc5711836c1,True
+Y_pvd_WTi.csv,Y_WTi,1740,17,17,0,0,93,0,0,0.0,0.9974370654769582,0,ab6a3b425d18d6f88f0466a7c40b340a,ab6a3b425d18d6f88f0466a7c40b340a,True
