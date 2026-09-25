@@ -9,15 +9,19 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
+# paths
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 RAW_DIR = PROJECT_DIR / "data" / "raw"
 PROCESSED_DIR = PROJECT_DIR / "data" / "processed"
 ALCU_RESULTS_DIR = PROJECT_DIR / "results" / "alcu"
 FIGURES_DIR = PROJECT_DIR / "figures"
 
+# analysis settings
 RANDOM_STATE = 42
 BOOTSTRAP_SAMPLES = 2000
 TOP_FEATURES_TO_PLOT = 12
+
+# alarm categories and their plot colors
 CATEGORY_ORDER = ["normal", "t2 alarm only", "q alarm only", "both alarms"]
 CATEGORY_COLORS = {
     "normal": "#8A94A6",
@@ -26,15 +30,22 @@ CATEGORY_COLORS = {
     "both alarms": "#7A3E9D",
 }
 
+# released-output metrics compared across alarm states
+COMPARED_METRICS = ["released_mean_index", "reference_profile_shape_deviation"]
 
+
+# excursion selection and channel contributions
+
+
+# pick the strongest t2-only, q-only and both-alarm observations
 def choose_excursions(monitoring):
     # one case from each alert type keeps the diagnostic set focused
-    t2_case = monitoring.loc[monitoring["alarm_category"].eq("t2 alarm only")].nlargest(
-        1, "t2_ratio"
-    )
-    q_case = monitoring.loc[monitoring["alarm_category"].eq("q alarm only")].nlargest(
-        1, "q_ratio"
-    )
+    t2_only = monitoring.loc[monitoring["alarm_category"].eq("t2 alarm only")]
+    t2_case = t2_only.nlargest(1, "t2_ratio")
+
+    q_only = monitoring.loc[monitoring["alarm_category"].eq("q alarm only")]
+    q_case = q_only.nlargest(1, "q_ratio")
+
     both_candidates = monitoring.loc[monitoring["alarm_category"].eq("both alarms")].copy()
     both_candidates["joint_alert_score"] = np.sqrt(
         both_candidates["t2_ratio"] * both_candidates["q_ratio"]
@@ -43,56 +54,76 @@ def choose_excursions(monitoring):
     return pd.concat([t2_case, q_case, both_case], ignore_index=True)
 
 
+# signed t2 terms and squared q terms for one standardized row
+def contribution_terms(standardized_row, components, eigenvalues):
+    scores = components @ standardized_row
+    reconstruction = scores @ components
+    residual = standardized_row - reconstruction
+
+    # squared residual contributions add exactly to q for this observation
+    q_contributions = residual**2
+
+    # signed t2 terms add to t2 but are diagnostic, not unique causal effects
+    t2_direction = components.T @ (scores / eigenvalues)
+    t2_contributions = standardized_row * t2_direction
+    return t2_contributions, q_contributions
+
+
+# one output row per feature for one excursion and one statistic
+def contribution_rows(excursion, observation_index, statistic, contributions, feature_names):
+    ranks = pd.Series(np.abs(contributions)).rank(method="first", ascending=False)
+    rows = []
+    for feature_number, feature in enumerate(feature_names):
+        rows.append(
+            {
+                "observation_index": observation_index,
+                "alarm_category": excursion["alarm_category"],
+                "primary_split": excursion["primary_split"],
+                "statistic": statistic,
+                "feature": feature,
+                "contribution": float(contributions[feature_number]),
+                "absolute_contribution": float(abs(contributions[feature_number])),
+                "absolute_rank": int(ranks.iloc[feature_number]),
+            }
+        )
+    return rows
+
+
+# per-feature t2 and q contributions for every selected excursion
 def calculate_contributions(process_inputs, selected_excursions, model):
     feature_names = model["feature_names"].tolist()
     scaler_mean = model["scaler_mean"]
     scaler_scale = model["scaler_scale"]
     components = model["components"]
     eigenvalues = model["eigenvalues"]
-    contribution_rows = []
+    all_rows = []
 
     for _, excursion in selected_excursions.iterrows():
         observation_index = int(excursion["observation_index"])
-        standardized_row = (
-            process_inputs.loc[observation_index, feature_names].to_numpy(dtype=float)
-            - scaler_mean
-        ) / scaler_scale
+        raw_row = process_inputs.loc[observation_index, feature_names].to_numpy(dtype=float)
+        standardized_row = (raw_row - scaler_mean) / scaler_scale
 
-        scores = components @ standardized_row
-        reconstruction = scores @ components
-        residual = standardized_row - reconstruction
-
-        # squared residual contributions add exactly to q for this observation
-        q_contributions = residual**2
-
-        # signed t2 terms add to t2 but are diagnostic, not unique causal effects
-        t2_direction = components.T @ (scores / eigenvalues)
-        t2_contributions = standardized_row * t2_direction
-
-        for statistic, contributions in [
-            ("T2", t2_contributions),
-            ("Q", q_contributions),
-        ]:
-            ranks = pd.Series(np.abs(contributions)).rank(
-                method="first", ascending=False
+        t2_contributions, q_contributions = contribution_terms(
+            standardized_row, components, eigenvalues
+        )
+        all_rows.extend(
+            contribution_rows(
+                excursion, observation_index, "T2", t2_contributions, feature_names
             )
-            for feature_number, feature in enumerate(feature_names):
-                contribution_rows.append(
-                    {
-                        "observation_index": observation_index,
-                        "alarm_category": excursion["alarm_category"],
-                        "primary_split": excursion["primary_split"],
-                        "statistic": statistic,
-                        "feature": feature,
-                        "contribution": float(contributions[feature_number]),
-                        "absolute_contribution": float(abs(contributions[feature_number])),
-                        "absolute_rank": int(ranks.iloc[feature_number]),
-                    }
-                )
+        )
+        all_rows.extend(
+            contribution_rows(
+                excursion, observation_index, "Q", q_contributions, feature_names
+            )
+        )
 
-    return pd.DataFrame(contribution_rows)
+    return pd.DataFrame(all_rows)
 
 
+# contribution figure
+
+
+# horizontal bars of the largest contributions for one excursion
 def plot_contribution_panel(axis, contribution_table, observation_index, statistic, title):
     selected = contribution_table.loc[
         contribution_table["observation_index"].eq(observation_index)
@@ -113,56 +144,58 @@ def plot_contribution_panel(axis, contribution_table, observation_index, statist
     axis.spines[["top", "right"]].set_visible(False)
 
 
-def plot_excursion_contributions(contribution_table, selected_excursions):
-    def diagnostic_scope(observation_index):
-        split = selected_excursions.loc[
-            selected_excursions["observation_index"].eq(observation_index),
-            "primary_split",
-        ].iat[0]
-        return "training diagnostic" if split == "train" else "held-out diagnostic"
+# observation index of the selected excursion in one alarm category
+def excursion_index(selected_excursions, category):
+    matches = selected_excursions.loc[
+        selected_excursions["alarm_category"].eq(category),
+        "observation_index",
+    ]
+    return int(matches.iat[0])
 
-    t2_index = int(
-        selected_excursions.loc[
-            selected_excursions["alarm_category"].eq("t2 alarm only"),
-            "observation_index",
-        ].iat[0]
-    )
-    q_index = int(
-        selected_excursions.loc[
-            selected_excursions["alarm_category"].eq("q alarm only"),
-            "observation_index",
-        ].iat[0]
-    )
-    both_index = int(
-        selected_excursions.loc[
-            selected_excursions["alarm_category"].eq("both alarms"),
-            "observation_index",
-        ].iat[0]
-    )
+
+# say whether an excursion came from the training or the held-out rows
+def diagnostic_scope(selected_excursions, observation_index):
+    split = selected_excursions.loc[
+        selected_excursions["observation_index"].eq(observation_index),
+        "primary_split",
+    ].iat[0]
+    if split == "train":
+        return "training diagnostic"
+    return "held-out diagnostic"
+
+
+# four contribution panels for the three selected excursions
+def plot_excursion_contributions(contribution_table, selected_excursions):
+    t2_index = excursion_index(selected_excursions, "t2 alarm only")
+    q_index = excursion_index(selected_excursions, "q alarm only")
+    both_index = excursion_index(selected_excursions, "both alarms")
 
     figure, axes = plt.subplots(2, 2, figsize=(13, 10))
+    t2_scope = diagnostic_scope(selected_excursions, t2_index)
     plot_contribution_panel(
         axes[0, 0],
         contribution_table,
         t2_index,
         "T2",
-        f"T²-Only Excursion {t2_index} ({diagnostic_scope(t2_index)})\n"
+        f"T²-Only Excursion {t2_index} ({t2_scope})\n"
         "Signed T² Terms",
     )
+    q_scope = diagnostic_scope(selected_excursions, q_index)
     plot_contribution_panel(
         axes[0, 1],
         contribution_table,
         q_index,
         "Q",
-        f"Q-Only Excursion {q_index} ({diagnostic_scope(q_index)})\n"
+        f"Q-Only Excursion {q_index} ({q_scope})\n"
         "Squared Residual Terms",
     )
+    both_scope = diagnostic_scope(selected_excursions, both_index)
     plot_contribution_panel(
         axes[1, 0],
         contribution_table,
         both_index,
         "T2",
-        f"Both-Alarm Excursion {both_index} ({diagnostic_scope(both_index)})\n"
+        f"Both-Alarm Excursion {both_index} ({both_scope})\n"
         "Signed T² Terms",
     )
     plot_contribution_panel(
@@ -170,7 +203,7 @@ def plot_excursion_contributions(contribution_table, selected_excursions):
         contribution_table,
         both_index,
         "Q",
-        f"Both-Alarm Excursion {both_index} ({diagnostic_scope(both_index)})\n"
+        f"Both-Alarm Excursion {both_index} ({both_scope})\n"
         "Squared Residual Terms",
     )
     figure.suptitle(
@@ -186,6 +219,10 @@ def plot_excursion_contributions(contribution_table, selected_excursions):
     plt.close(figure)
 
 
+# released-output quality by alarm state
+
+
+# add the released-output metrics and an any-alarm flag to the monitoring table
 def combine_quality_and_monitoring(quality_metrics, monitoring):
     metric_columns = [
         "observation_index",
@@ -205,6 +242,38 @@ def combine_quality_and_monitoring(quality_metrics, monitoring):
     return combined
 
 
+# count, mean, standard deviation, median, minimum and maximum of one metric in one group
+def describe_metric(scope_name, category, metric, values):
+    count = len(values)
+    if count:
+        mean = float(values.mean())
+        median = float(values.median())
+        minimum = float(values.min())
+        maximum = float(values.max())
+    else:
+        mean = np.nan
+        median = np.nan
+        minimum = np.nan
+        maximum = np.nan
+    if count > 1:
+        standard_deviation = float(values.std(ddof=1))
+    else:
+        standard_deviation = np.nan
+
+    return {
+        "scope": scope_name,
+        "alarm_category": category,
+        "metric": metric,
+        "observations": count,
+        "mean": mean,
+        "standard_deviation": standard_deviation,
+        "median": median,
+        "minimum": minimum,
+        "maximum": maximum,
+    }
+
+
+# describe each compared metric by alarm category, overall and held-out only
 def summarize_quality_by_category(combined):
     rows = []
     valid = combined.loc[~combined["all_zero_output"]].copy()
@@ -212,33 +281,18 @@ def summarize_quality_by_category(combined):
         "all valid observations": valid,
         "primary assessment only": valid.loc[valid["primary_split"].eq("test")],
     }
-    metrics = ["released_mean_index", "reference_profile_shape_deviation"]
 
     for scope_name, scope_data in scopes.items():
         for category in CATEGORY_ORDER:
             category_data = scope_data.loc[scope_data["alarm_category"].eq(category)]
-            for metric in metrics:
+            for metric in COMPARED_METRICS:
                 values = category_data[metric].dropna()
-                rows.append(
-                    {
-                        "scope": scope_name,
-                        "alarm_category": category,
-                        "metric": metric,
-                        "observations": len(values),
-                        "mean": float(values.mean()) if len(values) else np.nan,
-                        "standard_deviation": float(values.std(ddof=1))
-                        if len(values) > 1
-                        else np.nan,
-                        "median": float(values.median()) if len(values) else np.nan,
-                        "minimum": float(values.min()) if len(values) else np.nan,
-                        "maximum": float(values.max()) if len(values) else np.nan,
-                    }
-                )
+                rows.append(describe_metric(scope_name, category, metric, values))
     return pd.DataFrame(rows)
 
 
-def clustered_mean_difference_interval(assessment, metric):
-    # resampling exact target-profile groups keeps repeated outputs clustered
+# alarm and normal sums and counts inside each target-profile group
+def sum_by_profile_group(assessment, metric):
     group_rows = []
     for group_number, group in assessment.groupby("target_profile_group"):
         alarm_values = group.loc[group["any_alarm"], metric].dropna()
@@ -252,8 +306,11 @@ def clustered_mean_difference_interval(assessment, metric):
                 "normal_count": len(normal_values),
             }
         )
+    return pd.DataFrame(group_rows)
 
-    group_table = pd.DataFrame(group_rows)
+
+# alarm minus normal mean for each resample of whole groups
+def bootstrap_mean_differences(group_table):
     rng = np.random.default_rng(RANDOM_STATE)
     bootstrap_differences = []
     group_count = len(group_table)
@@ -263,10 +320,19 @@ def clustered_mean_difference_interval(assessment, metric):
         sample = group_table.iloc[sampled_rows]
         alarm_count = sample["alarm_count"].sum()
         normal_count = sample["normal_count"].sum()
+        # skip resamples that miss either state
         if alarm_count > 0 and normal_count > 0:
             alarm_mean = sample["alarm_sum"].sum() / alarm_count
             normal_mean = sample["normal_sum"].sum() / normal_count
             bootstrap_differences.append(alarm_mean - normal_mean)
+    return bootstrap_differences
+
+
+# alarm minus normal difference with a group bootstrap 95% interval
+def clustered_mean_difference_interval(assessment, metric):
+    # resampling exact target-profile groups keeps repeated outputs clustered
+    group_table = sum_by_profile_group(assessment, metric)
+    bootstrap_differences = bootstrap_mean_differences(group_table)
 
     alarm_values = assessment.loc[assessment["any_alarm"], metric].dropna()
     normal_values = assessment.loc[~assessment["any_alarm"], metric].dropna()
@@ -286,19 +352,18 @@ def clustered_mean_difference_interval(assessment, metric):
     }
 
 
+# alarm and normal means with the all-zero record excluded and included
 def build_zero_record_sensitivity(combined):
+    treatments = [
+        ("excluded", combined.loc[~combined["all_zero_output"]].copy()),
+        ("included where metric is defined", combined.copy()),
+    ]
     rows = []
-    for include_zero in [False, True]:
-        if include_zero:
-            data = combined.copy()
-            treatment = "included where metric is defined"
-        else:
-            data = combined.loc[~combined["all_zero_output"]].copy()
-            treatment = "excluded"
-
-        for metric in ["released_mean_index", "reference_profile_shape_deviation"]:
+    for treatment, data in treatments:
+        for metric in COMPARED_METRICS:
             alarm_values = data.loc[data["any_alarm"], metric].dropna()
             normal_values = data.loc[~data["any_alarm"], metric].dropna()
+            zero_output_values = combined.loc[combined["all_zero_output"], metric]
             rows.append(
                 {
                     "zero_output_treatment": treatment,
@@ -311,13 +376,14 @@ def build_zero_record_sensitivity(combined):
                         alarm_values.mean() - normal_values.mean()
                     ),
                     "zero_output_has_defined_metric": bool(
-                        combined.loc[combined["all_zero_output"], metric].notna().all()
+                        zero_output_values.notna().all()
                     ),
                 }
             )
     return pd.DataFrame(rows)
 
 
+# box plots of the compared metrics for each alarm category
 def plot_quality_by_state(combined):
     valid = combined.loc[~combined["all_zero_output"]]
     figure, axes = plt.subplots(1, 2, figsize=(12, 5))
@@ -327,10 +393,11 @@ def plot_quality_by_state(combined):
     ]
 
     for axis, (metric, label) in zip(axes, metrics):
-        values = [
-            valid.loc[valid["alarm_category"].eq(category), metric].dropna().to_numpy()
-            for category in CATEGORY_ORDER
-        ]
+        values = []
+        for category in CATEGORY_ORDER:
+            category_values = valid.loc[valid["alarm_category"].eq(category), metric]
+            values.append(category_values.dropna().to_numpy())
+
         boxplot = axis.boxplot(values, tick_labels=CATEGORY_ORDER, patch_artist=True)
         for box, category in zip(boxplot["boxes"], CATEGORY_ORDER):
             box.set_facecolor(CATEGORY_COLORS[category])
@@ -356,33 +423,36 @@ def plot_quality_by_state(combined):
     plt.close(figure)
 
 
+# main
+
+
+# pick excursions, rank channels, compare released quality by state, then save and print
 def main():
     ALCU_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
+    # load inputs, monitoring scores, quality metrics and the pca model
     process_inputs = pd.read_csv(RAW_DIR / "X_pvd_AlCu.csv")
     monitoring = pd.read_csv(PROCESSED_DIR / "alcu_monitoring_scores.csv")
     quality_metrics = pd.read_csv(PROCESSED_DIR / "alcu_quality_metrics.csv")
     model = np.load(PROCESSED_DIR / "alcu_pca_model.npz", allow_pickle=False)
 
+    # excursions and their channel contributions
     selected_excursions = choose_excursions(monitoring)
     contributions = calculate_contributions(process_inputs, selected_excursions, model)
-    combined = combine_quality_and_monitoring(quality_metrics, monitoring)
 
+    # quality summaries and held-out alarm versus normal comparisons
+    combined = combine_quality_and_monitoring(quality_metrics, monitoring)
     quality_summary = summarize_quality_by_category(combined)
     assessment = combined.loc[
         combined["primary_split"].eq("test") & ~combined["all_zero_output"]
     ].copy()
-    held_out_comparisons = pd.DataFrame(
-        [
-            clustered_mean_difference_interval(assessment, metric)
-            for metric in [
-                "released_mean_index",
-                "reference_profile_shape_deviation",
-            ]
-        ]
-    )
+    comparison_rows = []
+    for metric in COMPARED_METRICS:
+        comparison_rows.append(clustered_mean_difference_interval(assessment, metric))
+    held_out_comparisons = pd.DataFrame(comparison_rows)
     zero_sensitivity = build_zero_record_sensitivity(combined)
 
+    # result tables
     selected_columns = [
         "observation_index",
         "primary_split",
@@ -414,9 +484,11 @@ def main():
         index=False,
     )
 
+    # figures
     plot_excursion_contributions(contributions, selected_excursions)
     plot_quality_by_state(combined)
 
+    # printed report
     print("AlCu excursion and released-output analysis complete.")
     print("Selected excursions:")
     print(selected_excursions[selected_columns].to_string(index=False))

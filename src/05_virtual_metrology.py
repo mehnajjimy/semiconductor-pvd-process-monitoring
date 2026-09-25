@@ -1,3 +1,5 @@
+# alcu virtual metrology: predict the 17 released targets from the retained inputs
+
 from pathlib import Path
 
 import matplotlib
@@ -15,11 +17,15 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
+# folders
+
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 RAW_DIR = PROJECT_DIR / "data" / "raw"
 PROCESSED_DIR = PROJECT_DIR / "data" / "processed"
 ALCU_RESULTS_DIR = PROJECT_DIR / "results" / "alcu"
 FIGURES_DIR = PROJECT_DIR / "figures"
+
+# model settings
 
 RANDOM_STATE = 42
 CV_FOLDS = 5
@@ -42,6 +48,17 @@ FOREST_TREES = 300
 FOREST_MINIMUM_LEAF_SIZE = 5
 FOREST_MAX_FEATURE_SHARE = 0.70
 FOREST_REQUIRED_RMSE_IMPROVEMENT = 0.10
+
+# validation settings: label, split column in the assignments file, grouped cv folds
+
+PRIMARY_VALIDATION = "ordinary fixed split"
+VALIDATION_SETTINGS = [
+    (PRIMARY_VALIDATION, "primary_split", False),
+    ("identical-target-profile sensitivity", "grouped_sensitivity_split", True),
+]
+
+# alarm categories and their plot colors
+
 CATEGORY_ORDER = ["normal", "t2 alarm only", "q alarm only", "both alarms"]
 CATEGORY_COLORS = {
     "normal": "#8A94A6",
@@ -50,22 +67,44 @@ CATEGORY_COLORS = {
     "both alarms": "#7A3E9D",
 }
 
+# columns shown in the printed metrics table
 
+DISPLAY_COLUMNS = [
+    "validation",
+    "zero_output_treatment",
+    "model",
+    "ridge_alpha",
+    "training_rows",
+    "assessment_rows",
+    "aggregate_mae_17_targets",
+    "aggregate_rmse_17_targets",
+    "aggregate_r2_17_targets",
+]
+
+
+# error measures
+
+
+# root mean squared error over every value
 def aggregate_rmse(actual, predicted):
     return float(np.sqrt(np.mean((actual - predicted) ** 2)))
 
 
+# mean absolute error over every value
 def aggregate_mae(actual, predicted):
     return float(np.mean(np.abs(actual - predicted)))
 
 
+# model builders
+
+
+# scaling stays inside the pipeline so each cross-validation fold fits it alone
 def make_model(model):
-    # scaling stays inside the pipeline so each cross-validation fold fits it alone
     return Pipeline([("scale", StandardScaler()), ("model", model)])
 
 
+# trees do not need feature scaling and this fixed setting avoids a large search
 def make_random_forest(seed):
-    # trees do not need feature scaling and this fixed setting avoids a large search
     return RandomForestRegressor(
         n_estimators=FOREST_TREES,
         min_samples_leaf=FOREST_MINIMUM_LEAF_SIZE,
@@ -75,6 +114,10 @@ def make_random_forest(seed):
     )
 
 
+# cross-validation on training rows
+
+
+# shuffled folds by default, or folds that keep each target-profile group together
 def make_cv_folds(inputs, targets, groups=None):
     if groups is None:
         splitter = KFold(
@@ -95,6 +138,14 @@ def make_cv_folds(inputs, targets, groups=None):
     return folds, cv_method
 
 
+# fit on one training fold and score the matching validation fold
+def fold_rmse(model, inputs, targets, train_rows, validation_rows):
+    model.fit(inputs[train_rows], targets[train_rows])
+    predictions = model.predict(inputs[validation_rows])
+    return aggregate_rmse(targets[validation_rows], predictions)
+
+
+# pick the ridge alpha with the lowest mean validation rmse, smaller alpha on ties
 def choose_ridge_alpha(inputs, targets, groups=None):
     folds, cv_method = make_cv_folds(inputs, targets, groups)
 
@@ -103,10 +154,8 @@ def choose_ridge_alpha(inputs, targets, groups=None):
         fold_errors = []
         for train_rows, validation_rows in folds:
             model = make_model(Ridge(alpha=alpha))
-            model.fit(inputs[train_rows], targets[train_rows])
-            predictions = model.predict(inputs[validation_rows])
             fold_errors.append(
-                aggregate_rmse(targets[validation_rows], predictions)
+                fold_rmse(model, inputs, targets, train_rows, validation_rows)
             )
 
         rows.append(
@@ -129,18 +178,16 @@ def choose_ridge_alpha(inputs, targets, groups=None):
     return float(best_row["alpha"]), search_results
 
 
+# the optional model is admitted using training folds, never assessment rows
 def evaluate_random_forest_gate(inputs, targets, ridge_cv_rmse, groups=None):
-    # the optional model is admitted using training folds, never assessment rows
     folds, cv_method = make_cv_folds(inputs, targets, groups)
     rows = []
     for seed in FOREST_SEEDS:
         fold_errors = []
         for train_rows, validation_rows in folds:
             model = make_random_forest(seed)
-            model.fit(inputs[train_rows], targets[train_rows])
-            predictions = model.predict(inputs[validation_rows])
             fold_errors.append(
-                aggregate_rmse(targets[validation_rows], predictions)
+                fold_rmse(model, inputs, targets, train_rows, validation_rows)
             )
         mean_error = float(np.mean(fold_errors))
         improvement = 1 - mean_error / ridge_cv_rmse
@@ -166,10 +213,16 @@ def evaluate_random_forest_gate(inputs, targets, ridge_cv_rmse, groups=None):
     return pd.DataFrame(rows)
 
 
+# summaries of held-out predictions
+
+
+# divide by the reference profile, remove each row level, then measure what is left
 def reference_profile_shape(values, reference_profile):
     values = np.asarray(values, dtype=float)
     point_relative = values / reference_profile
     row_relative_mean = point_relative.mean(axis=1)
+
+    # rows with a zero or non-finite level have no shape and stay nan
     valid_rows = np.isfinite(row_relative_mean) & ~np.isclose(row_relative_mean, 0)
     deviations = np.full(len(values), np.nan)
     shape_relative = point_relative[valid_rows] / row_relative_mean[valid_rows, None]
@@ -177,6 +230,7 @@ def reference_profile_shape(values, reference_profile):
     return deviations
 
 
+# one metrics row for a model on one split
 def summarize_model(
     validation,
     zero_treatment,
@@ -222,6 +276,7 @@ def summarize_model(
     }
 
 
+# one metrics row per target for a model on one split
 def summarize_targets(validation, model_name, alpha, target_names, actual, predicted):
     rows = []
     for target_number, target in enumerate(target_names):
@@ -242,6 +297,7 @@ def summarize_targets(validation, model_name, alpha, target_names, actual, predi
     return rows
 
 
+# fit a scaled model on the training rows and predict the assessment rows
 def fit_and_assess(inputs, targets, train_mask, test_mask, model):
     fitted_model = make_model(model)
     fitted_model.fit(inputs[train_mask], targets[train_mask])
@@ -249,6 +305,7 @@ def fit_and_assess(inputs, targets, train_mask, test_mask, model):
     return fitted_model, predictions
 
 
+# one row per assessment observation with its alarm state, errors and predictions
 def build_prediction_table(
     assignments,
     monitoring,
@@ -286,6 +343,7 @@ def build_prediction_table(
     return table
 
 
+# row error statistics for each alarm category, nan when a category is too small
 def summarize_error_by_state(prediction_table):
     rows = []
     for category in CATEGORY_ORDER:
@@ -293,24 +351,60 @@ def summarize_error_by_state(prediction_table):
             prediction_table["alarm_category"].eq(category),
             "row_mae_17_targets",
         ]
+
+        mean_row_mae = np.nan
+        median_row_mae = np.nan
+        p90_row_mae = np.nan
+        maximum_row_mae = np.nan
+        if len(values) > 0:
+            mean_row_mae = float(values.mean())
+            median_row_mae = float(values.median())
+            p90_row_mae = float(values.quantile(0.90))
+            maximum_row_mae = float(values.max())
+
+        standard_deviation_row_mae = np.nan
+        if len(values) > 1:
+            standard_deviation_row_mae = float(values.std(ddof=1))
+
         rows.append(
             {
                 "alarm_category": category,
                 "observations": len(values),
-                "mean_row_mae": float(values.mean()) if len(values) else np.nan,
-                "standard_deviation_row_mae": float(values.std(ddof=1))
-                if len(values) > 1
-                else np.nan,
-                "median_row_mae": float(values.median()) if len(values) else np.nan,
-                "p90_row_mae": float(values.quantile(0.90)) if len(values) else np.nan,
-                "maximum_row_mae": float(values.max()) if len(values) else np.nan,
+                "mean_row_mae": mean_row_mae,
+                "standard_deviation_row_mae": standard_deviation_row_mae,
+                "median_row_mae": median_row_mae,
+                "p90_row_mae": p90_row_mae,
+                "maximum_row_mae": maximum_row_mae,
             }
         )
     return pd.DataFrame(rows)
 
 
+# figures
+
+
+# light grid and no top or right border on each panel
+def tidy_axes(axes):
+    for axis in axes:
+        axis.grid(alpha=0.20)
+        axis.spines[["top", "right"]].set_visible(False)
+
+
+# write the figure to the figures folder and free its memory
+def save_figure(figure, file_name):
+    figure.savefig(
+        FIGURES_DIR / file_name,
+        dpi=180,
+        bbox_inches="tight",
+    )
+    plt.close(figure)
+
+
+# predicted versus actual for every target value and for each row mean
 def plot_primary_predictions(actual, predicted, prediction_table, primary_metrics):
     figure, axes = plt.subplots(1, 2, figsize=(12, 5.2))
+
+    # left panel: all target values as a density of hexagons
     lower = float(min(actual.min(), predicted.min()))
     upper = float(max(actual.max(), predicted.max()))
     cells = axes[0].hexbin(
@@ -326,6 +420,7 @@ def plot_primary_predictions(actual, predicted, prediction_table, primary_metric
     axes[0].set_title("All 17 Direct Targets")
     figure.colorbar(cells, ax=axes[0], label="Assessment cells per hexagon")
 
+    # right panel: row mean index colored by alarm category
     for category in CATEGORY_ORDER:
         group = prediction_table.loc[
             prediction_table["alarm_category"].eq(category)
@@ -338,18 +433,10 @@ def plot_primary_predictions(actual, predicted, prediction_table, primary_metric
             color=CATEGORY_COLORS[category],
             label=f"{category} (n={len(group)})",
         )
-    mean_lower = float(
-        min(
-            prediction_table["actual_released_mean_index"].min(),
-            prediction_table["predicted_released_mean_index"].min(),
-        )
-    )
-    mean_upper = float(
-        max(
-            prediction_table["actual_released_mean_index"].max(),
-            prediction_table["predicted_released_mean_index"].max(),
-        )
-    )
+    actual_mean_index = prediction_table["actual_released_mean_index"]
+    predicted_mean_index = prediction_table["predicted_released_mean_index"]
+    mean_lower = float(min(actual_mean_index.min(), predicted_mean_index.min()))
+    mean_upper = float(max(actual_mean_index.max(), predicted_mean_index.max()))
     axes[1].plot(
         [mean_lower, mean_upper],
         [mean_lower, mean_upper],
@@ -361,9 +448,7 @@ def plot_primary_predictions(actual, predicted, prediction_table, primary_metric
     axes[1].set_title("Secondary Mean-Index Summary")
     axes[1].legend(frameon=False, fontsize=8)
 
-    for axis in axes:
-        axis.grid(alpha=0.20)
-        axis.spines[["top", "right"]].set_visible(False)
+    tidy_axes(axes)
     figure.suptitle(
         "AlCu Random Forest Virtual Metrology on the Ordinary Held-Out Split\n"
         f"17-target RMSE = {primary_metrics['aggregate_rmse_17_targets']:.4f}; "
@@ -371,49 +456,38 @@ def plot_primary_predictions(actual, predicted, prediction_table, primary_metric
         fontsize=13,
     )
     figure.tight_layout()
-    figure.savefig(
-        FIGURES_DIR / "08_alcu_virtual_metrology_predictions.png",
-        dpi=180,
-        bbox_inches="tight",
-    )
-    plt.close(figure)
+    save_figure(figure, "08_alcu_virtual_metrology_predictions.png")
 
 
+# side-by-side mae bars for the three models on each target
 def plot_per_target_errors(per_target_metrics):
     primary = per_target_metrics.loc[
-        per_target_metrics["validation"].eq("ordinary fixed split")
+        per_target_metrics["validation"].eq(PRIMARY_VALIDATION)
     ].copy()
     primary["target_number"] = primary["target"].str.extract(r"(\d+)$").astype(int)
-    linear = primary.loc[primary["model"].eq("Linear Regression")].sort_values(
-        "target_number"
-    )
-    ridge = primary.loc[primary["model"].eq("Ridge")].sort_values("target_number")
-    forest = primary.loc[primary["model"].eq("Random Forest")].sort_values(
-        "target_number"
-    )
-    positions = np.arange(1, len(linear) + 1)
+
+    # model name, bar offset from the target position, bar color
+    bar_styles = [
+        ("Linear Regression", -0.25, "#8A94A6"),
+        ("Ridge", 0, "#2F6690"),
+        ("Random Forest", 0.25, "#4C956C"),
+    ]
+    model_rows = {}
+    for model_name, _, _ in bar_styles:
+        model_rows[model_name] = primary.loc[
+            primary["model"].eq(model_name)
+        ].sort_values("target_number")
+
+    positions = np.arange(1, len(model_rows["Linear Regression"]) + 1)
     figure, axis = plt.subplots(figsize=(11, 5))
-    axis.bar(
-        positions - 0.25,
-        linear["mae"],
-        width=0.25,
-        color="#8A94A6",
-        label="Linear Regression",
-    )
-    axis.bar(
-        positions,
-        ridge["mae"],
-        width=0.25,
-        color="#2F6690",
-        label="Ridge",
-    )
-    axis.bar(
-        positions + 0.25,
-        forest["mae"],
-        width=0.25,
-        color="#4C956C",
-        label="Random Forest",
-    )
+    for model_name, offset, color in bar_styles:
+        axis.bar(
+            positions + offset,
+            model_rows[model_name]["mae"],
+            width=0.25,
+            color=color,
+            label=model_name,
+        )
     axis.set_xticks(positions)
     axis.set_xticklabels(positions)
     axis.set_xlabel("Released target measurement number")
@@ -423,23 +497,22 @@ def plot_per_target_errors(per_target_metrics):
     axis.spines[["top", "right"]].set_visible(False)
     axis.legend(frameon=False)
     figure.tight_layout()
-    figure.savefig(
-        FIGURES_DIR / "09_alcu_per_target_errors.png",
-        dpi=180,
-        bbox_inches="tight",
-    )
-    plt.close(figure)
+    save_figure(figure, "09_alcu_per_target_errors.png")
 
 
+# row error by alarm category and against the larger threshold ratio
 def plot_error_by_state(prediction_table):
     figure, axes = plt.subplots(1, 2, figsize=(12, 5.2))
-    state_values = [
-        prediction_table.loc[
-            prediction_table["alarm_category"].eq(category),
-            "row_mae_17_targets",
-        ].to_numpy()
-        for category in CATEGORY_ORDER
-    ]
+
+    # left panel: boxes of row error for each alarm category
+    state_values = []
+    for category in CATEGORY_ORDER:
+        state_values.append(
+            prediction_table.loc[
+                prediction_table["alarm_category"].eq(category),
+                "row_mae_17_targets",
+            ].to_numpy()
+        )
     boxes = axes[0].boxplot(
         state_values,
         tick_labels=CATEGORY_ORDER,
@@ -454,6 +527,7 @@ def plot_error_by_state(prediction_table):
     axes[0].set_title("Prediction Error by Empirical Alert Category")
     axes[0].tick_params(axis="x", rotation=20)
 
+    # right panel: row error against the larger of the t2 and q ratios
     maximum_ratio = prediction_table[["t2_ratio", "q_ratio"]].max(axis=1)
     for category in CATEGORY_ORDER:
         rows = prediction_table["alarm_category"].eq(category)
@@ -472,283 +546,291 @@ def plot_error_by_state(prediction_table):
     axes[1].set_title("Prediction Error versus Process-State Distance")
     axes[1].legend(frameon=False, fontsize=8)
 
-    for axis in axes:
-        axis.grid(alpha=0.20)
-        axis.spines[["top", "right"]].set_visible(False)
+    tidy_axes(axes)
     figure.suptitle(
         "AlCu Random Forest Error Diagnostics on the Ordinary Held-Out Split",
         fontsize=13,
     )
     figure.tight_layout()
-    figure.savefig(
-        FIGURES_DIR / "10_alcu_model_error_by_state.png",
-        dpi=180,
-        bbox_inches="tight",
+    save_figure(figure, "10_alcu_model_error_by_state.png")
+
+
+# steps for one validation setting
+
+
+# choose the ridge alpha and mark it in the search table
+def tune_ridge(validation, inputs, targets, groups):
+    selected_alpha, cv_results = choose_ridge_alpha(inputs, targets, groups)
+    cv_results.insert(0, "validation", validation)
+    cv_results["selected"] = cv_results["alpha"].eq(selected_alpha)
+    ridge_cv_rmse = float(
+        cv_results.loc[cv_results["selected"], "mean_validation_rmse"].iat[0]
     )
-    plt.close(figure)
+    return selected_alpha, cv_results, ridge_cv_rmse
 
 
-def main():
-    ALCU_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+# admit the forest only if every seed beats ridge by the required margin
+def run_forest_gate(validation, inputs, targets, ridge_cv_rmse, groups):
+    forest_gate = evaluate_random_forest_gate(inputs, targets, ridge_cv_rmse, groups)
+    forest_gate.insert(0, "validation", validation)
+    if validation == PRIMARY_VALIDATION:
+        admission_scope = "primary AlCu model and WTi configuration"
+    else:
+        admission_scope = "grouped-sensitivity AlCu model only"
+    forest_admitted = bool(forest_gate["passes_ten_percent_gate"].all())
+    forest_gate.insert(1, "admission_scope", admission_scope)
+    forest_gate.insert(2, "admitted_for_split", forest_admitted)
 
-    process_inputs = pd.read_csv(RAW_DIR / "X_pvd_AlCu.csv")
-    targets = pd.read_csv(RAW_DIR / "Y_pvd_AlCu.csv")
-    assignments = pd.read_csv(PROCESSED_DIR / "alcu_split_assignments.csv")
-    monitoring = pd.read_csv(PROCESSED_DIR / "alcu_monitoring_scores.csv")
-    feature_screening = pd.read_csv(PROCESSED_DIR / "alcu_feature_screening.csv")
+    # the primary analysis depends on the forest, so a failed gate stops the run
+    if validation == PRIMARY_VALIDATION and not forest_admitted:
+        raise ValueError(
+            "random forest did not pass the primary training-only entry gate"
+        )
+    return forest_gate, forest_admitted
 
-    retained_features = feature_screening.loc[
-        feature_screening["keep_for_modeling"], "feature"
-    ].tolist()
-    inputs_array = process_inputs[retained_features].to_numpy(dtype=float)
-    targets_array = targets.to_numpy(dtype=float)
+
+# fit the fixed-seed forest on the training rows and predict the assessment rows
+def fit_forest_and_predict(inputs, targets, train_rows, test_rows):
+    forest = make_random_forest(RANDOM_STATE)
+    forest.fit(inputs[train_rows], targets[train_rows])
+    return forest.predict(inputs[test_rows])
+
+
+# compare one model with all-zero output rows left out and kept in
+def zero_sensitivity_row(
+    validation, model_name, alpha, zero_output_location, excluded, included
+):
+    return {
+        "validation": validation,
+        "model": model_name,
+        "zero_output_location": zero_output_location,
+        "ridge_alpha": alpha,
+        "excluded_training_rows": excluded["training_rows"],
+        "included_training_rows": included["training_rows"],
+        "excluded_assessment_rows": excluded["assessment_rows"],
+        "included_assessment_rows": included["assessment_rows"],
+        "excluded_aggregate_rmse": excluded["aggregate_rmse_17_targets"],
+        "included_aggregate_rmse": included["aggregate_rmse_17_targets"],
+        "rmse_change_included_minus_excluded": included["aggregate_rmse_17_targets"]
+        - excluded["aggregate_rmse_17_targets"],
+    }
+
+
+# tune, gate, fit and summarize every model for one validation split
+def run_validation_setting(
+    validation,
+    split_column,
+    grouped_cv,
+    inputs_array,
+    targets_array,
+    target_names,
+    assignments,
+    monitoring,
+):
     valid_output = ~assignments["all_zero_output"].to_numpy()
-    settings = [
-        ("ordinary fixed split", "primary_split", False),
-        (
-            "identical-target-profile sensitivity",
-            "grouped_sensitivity_split",
-            True,
-        ),
-    ]
+    split_train = assignments[split_column].eq("train").to_numpy()
+    split_test = assignments[split_column].eq("test").to_numpy()
+    train_mask = split_train & valid_output
+    test_mask = split_test & valid_output
+    reference_profile = np.median(targets_array[train_mask], axis=0)
+    cv_groups = None
+    if grouped_cv:
+        cv_groups = assignments.loc[train_mask, "target_profile_group"].to_numpy()
+
+    # model choices use training rows only
+    selected_alpha, cv_results, ridge_cv_rmse = tune_ridge(
+        validation,
+        inputs_array[train_mask],
+        targets_array[train_mask],
+        cv_groups,
+    )
+    forest_gate, forest_admitted = run_forest_gate(
+        validation,
+        inputs_array[train_mask],
+        targets_array[train_mask],
+        ridge_cv_rmse,
+        cv_groups,
+    )
+
     metric_rows = []
     target_rows = []
-    cv_tables = []
-    forest_rows = []
-    zero_rows = []
-    primary_prediction_table = None
+    actual = targets_array[test_mask]
 
-    for validation, split_column, grouped_cv in settings:
-        split_train = assignments[split_column].eq("train").to_numpy()
-        split_test = assignments[split_column].eq("test").to_numpy()
-        train_mask = split_train & valid_output
-        test_mask = split_test & valid_output
-        reference_profile = np.median(targets_array[train_mask], axis=0)
-        cv_groups = None
-        if grouped_cv:
-            cv_groups = assignments.loc[
-                train_mask, "target_profile_group"
-            ].to_numpy()
-        selected_alpha, cv_results = choose_ridge_alpha(
-            inputs_array[train_mask],
-            targets_array[train_mask],
-            cv_groups,
-        )
-        cv_results.insert(0, "validation", validation)
-        cv_results["selected"] = cv_results["alpha"].eq(selected_alpha)
-        cv_tables.append(cv_results)
-
-        ridge_cv_rmse = float(
-            cv_results.loc[cv_results["selected"], "mean_validation_rmse"].iat[0]
-        )
-        forest_gate = evaluate_random_forest_gate(
-            inputs_array[train_mask],
-            targets_array[train_mask],
-            ridge_cv_rmse,
-            cv_groups,
-        )
-        forest_gate.insert(0, "validation", validation)
-        admission_scope = (
-            "primary AlCu model and WTi configuration"
-            if validation == "ordinary fixed split"
-            else "grouped-sensitivity AlCu model only"
-        )
-        forest_admitted = bool(forest_gate["passes_ten_percent_gate"].all())
-        forest_gate.insert(1, "admission_scope", admission_scope)
-        forest_gate.insert(2, "admitted_for_split", forest_admitted)
-        forest_rows.extend(forest_gate.to_dict("records"))
-        if validation == "ordinary fixed split" and not forest_admitted:
-            raise ValueError(
-                "random forest did not pass the primary training-only entry gate"
-            )
-
-        actual = targets_array[test_mask]
-        models = [
-            ("Linear Regression", np.nan, LinearRegression()),
-            ("Ridge", selected_alpha, Ridge(alpha=selected_alpha)),
-        ]
-        for model_name, alpha, model in models:
-            _, predictions = fit_and_assess(
-                inputs_array,
-                targets_array,
-                train_mask,
-                test_mask,
-                model,
-            )
-            summary = summarize_model(
-                validation,
-                "excluded",
-                model_name,
-                alpha,
-                train_mask,
-                test_mask,
-                assignments,
-                actual,
-                predictions,
-                reference_profile,
-            )
-            metric_rows.append(summary)
-            target_rows.extend(
-                summarize_targets(
-                    validation,
-                    model_name,
-                    alpha,
-                    targets.columns,
-                    actual,
-                    predictions,
-                )
-            )
-        ridge_summary = next(
-            row
-            for row in metric_rows
-            if row["validation"] == validation
-            and row["zero_output_treatment"] == "excluded"
-            and row["model"] == "Ridge"
-        )
-        forest_summary = None
-        if forest_admitted:
-            selected_forest = make_random_forest(RANDOM_STATE)
-            selected_forest.fit(inputs_array[train_mask], targets_array[train_mask])
-            selected_forest_predictions = selected_forest.predict(
-                inputs_array[test_mask]
-            )
-            forest_summary = summarize_model(
-                validation,
-                "excluded",
-                "Random Forest",
-                np.nan,
-                train_mask,
-                test_mask,
-                assignments,
-                actual,
-                selected_forest_predictions,
-                reference_profile,
-            )
-            metric_rows.append(forest_summary)
-            target_rows.extend(
-                summarize_targets(
-                    validation,
-                    "Random Forest",
-                    np.nan,
-                    targets.columns,
-                    actual,
-                    selected_forest_predictions,
-                )
-            )
-            if validation == "ordinary fixed split":
-                primary_actual = actual
-                primary_predicted = selected_forest_predictions
-                primary_prediction_table = build_prediction_table(
-                    assignments,
-                    monitoring,
-                    test_mask,
-                    targets.columns,
-                    actual,
-                    selected_forest_predictions,
-                    reference_profile,
-                )
-
-        # reuse model settings so this comparison isolates zero handling
-        _, included_ridge_predictions = fit_and_assess(
+    # linear baselines with all-zero output rows left out
+    ridge_summary = None
+    models = [
+        ("Linear Regression", np.nan, LinearRegression()),
+        ("Ridge", selected_alpha, Ridge(alpha=selected_alpha)),
+    ]
+    for model_name, alpha, model in models:
+        _, predictions = fit_and_assess(
             inputs_array,
             targets_array,
-            split_train,
-            split_test,
-            Ridge(alpha=selected_alpha),
+            train_mask,
+            test_mask,
+            model,
         )
-        included_ridge_summary = summarize_model(
+        summary = summarize_model(
+            validation,
+            "excluded",
+            model_name,
+            alpha,
+            train_mask,
+            test_mask,
+            assignments,
+            actual,
+            predictions,
+            reference_profile,
+        )
+        metric_rows.append(summary)
+        target_rows.extend(
+            summarize_targets(
+                validation,
+                model_name,
+                alpha,
+                target_names,
+                actual,
+                predictions,
+            )
+        )
+        if model_name == "Ridge":
+            ridge_summary = summary
+
+    # the admitted forest with all-zero output rows left out
+    forest_summary = None
+    forest_predictions = None
+    prediction_table = None
+    if forest_admitted:
+        forest_predictions = fit_forest_and_predict(
+            inputs_array, targets_array, train_mask, test_mask
+        )
+        forest_summary = summarize_model(
+            validation,
+            "excluded",
+            "Random Forest",
+            np.nan,
+            train_mask,
+            test_mask,
+            assignments,
+            actual,
+            forest_predictions,
+            reference_profile,
+        )
+        metric_rows.append(forest_summary)
+        target_rows.extend(
+            summarize_targets(
+                validation,
+                "Random Forest",
+                np.nan,
+                target_names,
+                actual,
+                forest_predictions,
+            )
+        )
+        if validation == PRIMARY_VALIDATION:
+            prediction_table = build_prediction_table(
+                assignments,
+                monitoring,
+                test_mask,
+                target_names,
+                actual,
+                forest_predictions,
+                reference_profile,
+            )
+
+    # reuse model settings so this comparison isolates zero handling
+    _, included_ridge_predictions = fit_and_assess(
+        inputs_array,
+        targets_array,
+        split_train,
+        split_test,
+        Ridge(alpha=selected_alpha),
+    )
+    included_ridge_summary = summarize_model(
+        validation,
+        "included for sensitivity only",
+        "Ridge",
+        selected_alpha,
+        split_train,
+        split_test,
+        assignments,
+        targets_array[split_test],
+        included_ridge_predictions,
+        reference_profile,
+    )
+    metric_rows.append(included_ridge_summary)
+
+    included_forest_summary = None
+    if forest_admitted:
+        included_forest_predictions = fit_forest_and_predict(
+            inputs_array, targets_array, split_train, split_test
+        )
+        included_forest_summary = summarize_model(
             validation,
             "included for sensitivity only",
-            "Ridge",
-            selected_alpha,
+            "Random Forest",
+            np.nan,
             split_train,
             split_test,
             assignments,
             targets_array[split_test],
-            included_ridge_predictions,
+            included_forest_predictions,
             reference_profile,
         )
-        metric_rows.append(included_ridge_summary)
+        metric_rows.append(included_forest_summary)
 
-        included_forest_summary = None
-        if forest_admitted:
-            included_forest = make_random_forest(RANDOM_STATE)
-            included_forest.fit(
-                inputs_array[split_train],
-                targets_array[split_train],
-            )
-            included_forest_predictions = included_forest.predict(
-                inputs_array[split_test]
-            )
-            included_forest_summary = summarize_model(
+    # side-by-side rows for the zero-output comparison
+    if bool((split_train & ~valid_output).any()):
+        zero_output_location = "train"
+    else:
+        zero_output_location = "test"
+    zero_rows = [
+        zero_sensitivity_row(
+            validation,
+            "Ridge",
+            selected_alpha,
+            zero_output_location,
+            ridge_summary,
+            included_ridge_summary,
+        )
+    ]
+    if forest_admitted:
+        zero_rows.append(
+            zero_sensitivity_row(
                 validation,
-                "included for sensitivity only",
                 "Random Forest",
                 np.nan,
-                split_train,
-                split_test,
-                assignments,
-                targets_array[split_test],
-                included_forest_predictions,
-                reference_profile,
+                zero_output_location,
+                forest_summary,
+                included_forest_summary,
             )
-            metric_rows.append(included_forest_summary)
-
-        zero_output_location = (
-            "train" if bool((split_train & ~valid_output).any()) else "test"
         )
-        zero_comparisons = [
-            (
-                "Ridge",
-                selected_alpha,
-                ridge_summary,
-                included_ridge_summary,
-            )
-        ]
-        if forest_admitted:
-            zero_comparisons.append(
-                (
-                    "Random Forest",
-                    np.nan,
-                    forest_summary,
-                    included_forest_summary,
-                )
-            )
-        for (
-            model_name,
-            alpha,
-            excluded_summary,
-            included_summary,
-        ) in zero_comparisons:
-            zero_rows.append(
-                {
-                    "validation": validation,
-                    "model": model_name,
-                    "zero_output_location": zero_output_location,
-                    "ridge_alpha": alpha,
-                    "excluded_training_rows": excluded_summary["training_rows"],
-                    "included_training_rows": included_summary["training_rows"],
-                    "excluded_assessment_rows": excluded_summary["assessment_rows"],
-                    "included_assessment_rows": included_summary["assessment_rows"],
-                    "excluded_aggregate_rmse": excluded_summary[
-                        "aggregate_rmse_17_targets"
-                    ],
-                    "included_aggregate_rmse": included_summary[
-                        "aggregate_rmse_17_targets"
-                    ],
-                    "rmse_change_included_minus_excluded": included_summary[
-                        "aggregate_rmse_17_targets"
-                    ]
-                    - excluded_summary["aggregate_rmse_17_targets"],
-                }
-            )
 
-    metrics = pd.DataFrame(metric_rows)
-    per_target_metrics = pd.DataFrame(target_rows)
-    ridge_cv_results = pd.concat(cv_tables, ignore_index=True)
-    forest_stability = pd.DataFrame(forest_rows)
-    zero_sensitivity = pd.DataFrame(zero_rows)
-    error_by_state = summarize_error_by_state(primary_prediction_table)
+    return {
+        "metric_rows": metric_rows,
+        "target_rows": target_rows,
+        "cv_results": cv_results,
+        "forest_rows": forest_gate.to_dict("records"),
+        "zero_rows": zero_rows,
+        "actual": actual,
+        "forest_predictions": forest_predictions,
+        "prediction_table": prediction_table,
+    }
+
+
+# saving and printing
+
+
+# write every result table as csv
+def save_tables(
+    metrics,
+    per_target_metrics,
+    ridge_cv_results,
+    forest_stability,
+    zero_sensitivity,
+    primary_prediction_table,
+    error_by_state,
+):
     metrics.to_csv(
         ALCU_RESULTS_DIR / "alcu_virtual_metrology_metrics.csv",
         index=False,
@@ -772,33 +854,13 @@ def main():
         ALCU_RESULTS_DIR / "alcu_model_error_by_state.csv", index=False
     )
 
-    primary_metrics = metrics.loc[
-        metrics["validation"].eq("ordinary fixed split")
-        & metrics["zero_output_treatment"].eq("excluded")
-        & metrics["model"].eq("Random Forest")
-    ].iloc[0]
-    plot_primary_predictions(
-        primary_actual,
-        primary_predicted,
-        primary_prediction_table,
-        primary_metrics,
-    )
-    plot_per_target_errors(per_target_metrics)
-    plot_error_by_state(primary_prediction_table)
 
-    display_columns = [
-        "validation",
-        "zero_output_treatment",
-        "model",
-        "ridge_alpha",
-        "training_rows",
-        "assessment_rows",
-        "aggregate_mae_17_targets",
-        "aggregate_rmse_17_targets",
-        "aggregate_r2_17_targets",
-    ]
+# print the headline tables to the console
+def print_summary(
+    metrics, ridge_cv_results, forest_stability, zero_sensitivity, error_by_state
+):
     print("AlCu direct 17-target virtual metrology complete.")
-    print(metrics[display_columns].to_string(index=False))
+    print(metrics[DISPLAY_COLUMNS].to_string(index=False))
     print()
     print("Ridge tuning:")
     print(
@@ -827,6 +889,90 @@ def main():
     print()
     print("Primary Random Forest error by retrospective process state:")
     print(error_by_state.to_string(index=False))
+
+
+# main pipeline
+
+
+# fit and assess every model on both validation settings, then save, plot and print
+def main():
+    ALCU_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # load the released data and the outputs of the earlier scripts
+    process_inputs = pd.read_csv(RAW_DIR / "X_pvd_AlCu.csv")
+    targets = pd.read_csv(RAW_DIR / "Y_pvd_AlCu.csv")
+    assignments = pd.read_csv(PROCESSED_DIR / "alcu_split_assignments.csv")
+    monitoring = pd.read_csv(PROCESSED_DIR / "alcu_monitoring_scores.csv")
+    feature_screening = pd.read_csv(PROCESSED_DIR / "alcu_feature_screening.csv")
+
+    retained_features = feature_screening.loc[
+        feature_screening["keep_for_modeling"], "feature"
+    ].tolist()
+    inputs_array = process_inputs[retained_features].to_numpy(dtype=float)
+    targets_array = targets.to_numpy(dtype=float)
+
+    # run each validation setting and collect its rows
+    metric_rows = []
+    target_rows = []
+    cv_tables = []
+    forest_rows = []
+    zero_rows = []
+    for validation, split_column, grouped_cv in VALIDATION_SETTINGS:
+        outcome = run_validation_setting(
+            validation,
+            split_column,
+            grouped_cv,
+            inputs_array,
+            targets_array,
+            targets.columns,
+            assignments,
+            monitoring,
+        )
+        metric_rows.extend(outcome["metric_rows"])
+        target_rows.extend(outcome["target_rows"])
+        cv_tables.append(outcome["cv_results"])
+        forest_rows.extend(outcome["forest_rows"])
+        zero_rows.extend(outcome["zero_rows"])
+        if validation == PRIMARY_VALIDATION:
+            primary_actual = outcome["actual"]
+            primary_predicted = outcome["forest_predictions"]
+            primary_prediction_table = outcome["prediction_table"]
+
+    # build and save the result tables
+    metrics = pd.DataFrame(metric_rows)
+    per_target_metrics = pd.DataFrame(target_rows)
+    ridge_cv_results = pd.concat(cv_tables, ignore_index=True)
+    forest_stability = pd.DataFrame(forest_rows)
+    zero_sensitivity = pd.DataFrame(zero_rows)
+    error_by_state = summarize_error_by_state(primary_prediction_table)
+    save_tables(
+        metrics,
+        per_target_metrics,
+        ridge_cv_results,
+        forest_stability,
+        zero_sensitivity,
+        primary_prediction_table,
+        error_by_state,
+    )
+
+    # figures for the ordinary held-out split
+    primary_metrics = metrics.loc[
+        metrics["validation"].eq(PRIMARY_VALIDATION)
+        & metrics["zero_output_treatment"].eq("excluded")
+        & metrics["model"].eq("Random Forest")
+    ].iloc[0]
+    plot_primary_predictions(
+        primary_actual,
+        primary_predicted,
+        primary_prediction_table,
+        primary_metrics,
+    )
+    plot_per_target_errors(per_target_metrics)
+    plot_error_by_state(primary_prediction_table)
+
+    print_summary(
+        metrics, ridge_cv_results, forest_stability, zero_sensitivity, error_by_state
+    )
 
 
 if __name__ == "__main__":
