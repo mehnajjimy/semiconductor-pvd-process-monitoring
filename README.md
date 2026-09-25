@@ -2,14 +2,15 @@
 
 **Release:** v1.0
 
-This project uses anonymized physical vapor deposition (PVD) process data to
-build a retrospective multivariate process-state monitoring and virtual
-metrology workflow. AlCu is the primary analysis, while WTi is a separately
-fitted replication of the same workflow.
+This project uses anonymized physical vapor deposition (PVD) process data for
+two things. One is a retrospective view of the multivariate process state. The
+other is virtual metrology, which predicts the measured targets from the
+process inputs. AlCu is the main analysis. WTi repeats the same workflow with
+its own separately fitted models.
 
-The analysis reduces correlated process inputs to a smaller monitoring view,
-ranks anonymous channels for excursion review, and predicts all 17 released
-target measurements directly.
+The workflow shrinks many correlated process inputs into a smaller monitoring
+view. It ranks anonymous channels so excursions can be reviewed in order. It
+also predicts all 17 released target measurements directly.
 
 ## Data
 
@@ -21,34 +22,35 @@ The data come from Infineon's public
 | AlCu | 97 | 17 | 4,848 |
 | WTi | 108 | 17 | 1,740 |
 
-The four local CSV files are unchanged copies of the release and match its MD5
-checksums. They are ignored by Git. The dataset is licensed under
-[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) and was published by
-Amina Mević, Andreas Laber, and Senka Krivić. Download instructions and
+My four local CSV files are unchanged copies of the release, and they match its
+MD5 checksums. Git ignores them. Amina Mević, Andreas Laber, and Senka Krivić
+published the dataset under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Download steps and
 checksums are in [`data/raw/README.md`](data/raw/README.md).
 
-The release does not include physical units, inverse scaling, timestamps,
-equipment identifiers, measurement-point coordinates, specifications, or fault
-labels. All reported quantities remain on the released scale. The derived mean
-index and reference-profile deviation are engineering summaries, not physical
-thickness or physical uniformity.
+The release leaves out physical units, inverse scaling, timestamps, equipment
+identifiers, measurement-point coordinates, specifications, and fault labels.
+So every number here stays on the released scale. The mean index and
+reference-profile deviation are summaries I derived for engineering review.
+They are not physical thickness or physical uniformity.
 
 ## Method
 
-- Audit file identity, shapes, missing values, duplicates, and X/Y row counts.
-- Use a fixed 80/20 split for primary validation, then repeat validation with
-  exactly equal target profiles kept together. Equal profiles are not assumed
-  to be duplicate wafers.
-- Keep all-zero target records in process-state monitoring, exclude them from
-  primary Y-based modeling, and run with/without sensitivity checks. Their
+- Check file identity, shapes, missing values, duplicates, and X/Y row counts.
+- Validate on a fixed 80/20 split first. Then validate again with rows that
+  share exactly the same target profile kept together. I do not assume that
+  equal profiles are duplicate wafers.
+- Keep the all-zero target records for process-state monitoring. Leave them
+  out of the main Y-based models, and run checks with and without them. Their
   meaning is unknown.
-- Fit standardization and PCA on training data only. Retain the fewest
-  components that explain at least 90% of variance, then calculate Hotelling T²
-  and Q/SPE with training-set 99th-percentile empirical alert thresholds.
+- Fit standardization and PCA on training data only. Keep the fewest
+  components that explain at least 90% of the variance. Then compute Hotelling
+  T² and Q/SPE, with empirical alert thresholds at the 99th percentile of the
+  training set.
 - Predict the 17 targets with multi-output Linear Regression and Ridge. A fixed
-  Random Forest is included because it passes a predeclared, training-only
-  improvement gate. Each validation split has its own gate; only the primary
-  AlCu gate transfers the model configuration to WTi.
+  Random Forest is also included because it passed an improvement gate that
+  was set in advance and uses training data only. Each validation split has its
+  own gate. Only the primary AlCu gate passes the model settings on to WTi.
 
 ## Results
 
@@ -62,39 +64,39 @@ thickness or physical uniformity.
 | Random Forest aggregate R² | 0.622 | 0.604 |
 | Grouped-sensitivity Random Forest RMSE | 0.00926 | 0.00767 |
 
-For AlCu, grouping identical target profiles increased Random Forest RMSE by
-6.4% and reduced aggregate R² from 0.622 to 0.543. The ordinary split is
-somewhat optimistic, but the grouped result retains useful released-scale
-predictive signal. WTi improved under the grouped split. Because the two
-processes use different released scales, their errors are not a physical
-ranking.
+For AlCu, keeping identical target profiles together raised Random Forest RMSE
+by 6.4% and lowered aggregate R² from 0.622 to 0.543. So the ordinary split is
+a little optimistic. Even so, the grouped result still predicts the
+released-scale targets usefully. WTi did better under the grouped split. The
+two processes use different released scales, so their errors do not rank them
+physically.
 
-The AlCu alerted-versus-normal output comparisons did not establish a clear
-released-output shift: both clustered 95% intervals crossed zero. Only four
-assessment rows triggered both T² and Q/SPE alarms, so their larger prediction
-error is descriptive rather than a production rule. Aggregate and per-target
-errors are listed in the [`results/` guide](results/README.md).
+For AlCu, the alerted rows did not show a clear shift in released output
+compared with normal rows. Both clustered 95% intervals crossed zero. Only four
+assessment rows set off both the T² and Q/SPE alarms. Their prediction error was
+larger, but that is a description, not a production rule. The
+[`results/` guide](results/README.md) lists aggregate and per-target errors.
 
 ## Engineering figures
 
 ![AlCu retrospective process-state map](figures/05_alcu_process_state_map.png)
 
-T² and Q/SPE provide complementary statistical excursion views; the categories
-are review priorities, not fault labels.
+T² and Q/SPE flag statistical excursions in different ways. The categories set
+review priority. They are not fault labels.
 
 ![AlCu excursion contribution plots](figures/06_alcu_excursion_contributions.png)
 
-Contribution plots identify anonymous channels to review first. They do not
-establish physical causation.
+Contribution plots show which anonymous channels to review first. They do not
+prove physical cause.
 
 ![AlCu direct 17-target virtual metrology predictions](figures/08_alcu_virtual_metrology_predictions.png)
 
-The held-out predictions cover all 17 released targets directly; the mean index
-is shown only as a secondary engineering summary.
+The held-out predictions cover all 17 released targets directly. The mean index
+appears only as a secondary engineering summary.
 
 ## Reproduce
 
-Place the four downloaded CSV files in `data/raw/`, then run:
+Put the four downloaded CSV files in `data/raw/`, then run:
 
 ```bash
 python3 -m venv .venv
@@ -109,19 +111,19 @@ python src/05_virtual_metrology.py
 python src/06_wti_validation.py
 ```
 
-The numbered scripts run in sequence because later stages read earlier outputs.
+Run the scripts in this order, because later ones read what earlier ones write.
 
 ## Limits
 
-- X/Y pairing is positional because the release provides no join key.
-- With no chronology or known-good baseline, this is retrospective multivariate
-  process-state monitoring, not formal chronological SPC.
-- The thresholds are empirical alerts, not validated control limits or
-  independently calibrated false-alarm limits.
-- Missing specifications prevent Cp/Cpk analysis, and missing fault labels
-  prevent validated fault detection.
+- X/Y pairing goes by row position, because the release has no join key.
+- There is no chronology or known-good baseline. So this is retrospective
+  multivariate process-state monitoring, not formal chronological SPC.
+- The thresholds are empirical alerts. They are not validated control limits,
+  and their false-alarm rates are not independently calibrated.
+- Without specifications there is no Cp/Cpk analysis. Without fault labels
+  there is no validated fault detection.
 - WTi is a second released process dataset, not an external fab qualification.
 
-See the concise [`technical report`](report/technical_report.md) for the full
-method and interpretation, or the [`results/` guide](results/README.md) for the
-main tables and supporting sensitivity outputs.
+The [`technical report`](report/technical_report.md) has the full method and
+interpretation. The [`results/` guide](results/README.md) covers the main
+tables and the supporting sensitivity outputs.
