@@ -12,6 +12,12 @@ The workflow shrinks many correlated process inputs into a smaller monitoring
 view. It ranks anonymous channels so excursions can be reviewed in order. It
 also predicts all 17 released target measurements directly.
 
+![AlCu direct 17-target virtual metrology predictions](figures/08_alcu_virtual_metrology_predictions.png)
+
+These are held-out AlCu predictions for all 17 released targets. The Random
+Forest reached an aggregate R² of 0.622 for AlCu and 0.604 for WTi, and cut
+RMSE by 41% (AlCu) and 43% (WTi) compared with Ridge regression.
+
 ## Data
 
 The data come from Infineon's public
@@ -89,10 +95,8 @@ review priority. They are not fault labels.
 Contribution plots show which anonymous channels to review first. They do not
 prove physical cause.
 
-![AlCu direct 17-target virtual metrology predictions](figures/08_alcu_virtual_metrology_predictions.png)
-
-The held-out predictions cover all 17 released targets directly. The mean index
-appears only as a secondary engineering summary.
+The prediction plot at the top shows the mean index only as a secondary
+engineering summary.
 
 ## Reproduce
 
