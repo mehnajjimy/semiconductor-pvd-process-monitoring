@@ -1,6 +1,8 @@
 # Data and validation
 
-I used two public, anonymized datasets of 4,848 and 1,740 records, and every number stays on the released scale. Two choices shape the results. One is an 80/20 split plus a second split that keeps repeated target profiles together. The other is a special rule for the all-zero target records. Back to the [README](../README.md).
+I used two public, anonymized datasets of 4,848 and 1,740 records, and every number stays on the released scale. Back to the [README](../README.md).
+
+Two choices shape the results. One is an 80/20 split plus a second split that keeps repeated target profiles together. The other is a special rule for the all-zero target records.
 
 > [!NOTE]
 > <sub>physical vapor deposition (PVD): a chipmaking step that deposits thin metal films · target: one of the 17 released measurements to predict · profile: the set of 17 target values for one record · released scale: the anonymized units used in the data release</sub>
