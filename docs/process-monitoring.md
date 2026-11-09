@@ -47,7 +47,7 @@ Contribution terms point to channels worth reviewing. `Sensor_53`, `Sensor_56`, 
 
 These rankings help diagnosis, but they do not prove a physical root cause.
 
-## Do alerts change the released output?
+## Released output for alerted rows
 
 For the valid AlCu assessment rows, I ran a 2,000-sample bootstrap that resampled exact target-profile groups together.
 
