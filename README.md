@@ -2,14 +2,14 @@
 
 <p align="center"><a href="#overview">Overview</a> · <a href="#data">Data</a> · <a href="#method">Method</a> · <a href="#results">Results</a> · <a href="#limits">Limits</a> · <a href="#usage">Usage</a> · <a href="#references">References</a> · <a href="#terms">Terms</a></p>
 
-I wanted to know two things about a chipmaking step that coats wafers with thin metal films. Can its sensor readings flag unusual process states, and can they predict the quality measurements taken afterward? I used a public, anonymized dataset with 4,848 AlCu records and 1,740 WTi records.
+I built two Python workflows on public, anonymized Infineon physical vapor deposition (PVD) data. The first is multivariate process monitoring to flag unusual runs and rank the channels driving them. The second is virtual metrology to predict all 17 released measurements. I developed the workflow on 4,848 AlCu records and fitted separate models on 1,740 WTi records to see how it held up on a second process.
 
 ## Key results
 
-- A Random Forest predicts all 17 released target measurements with an aggregate R² of 0.622 (AlCu) and 0.604 (WTi), and cuts RMSE by 41% (AlCu) and 43% (WTi) compared with Ridge regression.
-- Principal component analysis (PCA) shrinks 95 AlCu inputs to 34 components and 108 WTi inputs to 35, keeping about 90% of the variance.
+- On the ordinary held-out splits, Random Forest models cut 17-target root-mean-square error (RMSE) by 41% for AlCu and 43% for WTi versus Ridge regression. Aggregate R² was 0.622 and 0.604, respectively.
+- Fitted principal component analysis (PCA) and empirical Hotelling T² and squared prediction error limits on training rows. PCA retained about 90% of training variance in 34 AlCu components and 35 WTi components.
 - On held-out rows, 1.13% of AlCu and 4.31% of WTi rows trip an alert. The alerted AlCu rows do not show a clear shift in released output.
-- Keeping rows with identical target profiles together raised AlCu Random Forest RMSE by 6.4% and lowered R² from 0.622 to 0.543. WTi improved to 0.690.
+- Re-evaluated the models with identical target profiles kept in the same split. Random Forest R² moved from 0.622 to 0.543 on AlCu and from 0.604 to 0.690 on WTi.
 
 ![AlCu direct 17-target virtual metrology predictions](figures/08_alcu_virtual_metrology_predictions.png)
 
@@ -27,7 +27,7 @@ I shrink the many correlated process inputs into a smaller monitoring view, rank
 ## Data
 
 The data come from Infineon's public
-[Advanced Process Control and Statistical Process Control Data for Thickness Prediction of AlCu and WTi Metal Layer in Semiconductor Manufacturing](https://doi.org/10.5281/zenodo.16881338).
+[Public Infineon AlCu and WTi deposition dataset](https://doi.org/10.5281/zenodo.16881338).
 
 | Process | Input columns | Released targets | Rows |
 |---|---:|---:|---:|
@@ -143,12 +143,10 @@ The [`results/` guide](results/README.md) lists aggregate and per-target errors.
 ## Limits
 
 - X/Y pairing goes by row position, because the release has no join key.
-- There is no chronology or known-good baseline. So this is retrospective
-  multivariate process-state monitoring, not formal chronological SPC.
+- The release omits chronology and a known-good baseline. The workflow screens historical multivariate process states.
 - The thresholds are empirical alerts. They are not validated control limits,
   and their false-alarm rates are not independently calibrated.
-- Without specifications there is no Cp/Cpk analysis. Without fault labels
-  there is no validated fault detection.
+- The release omits process specifications and fault labels. The workflow reports statistical excursions for review.
 - WTi is a second released process dataset, not an external fab qualification.
 
 ## Usage
@@ -174,7 +172,7 @@ Run the scripts in this order, because later ones read what earlier ones write.
 
 Release v1.0.
 
-- [Infineon PVD APC/SPC dataset](https://doi.org/10.5281/zenodo.16881338), published under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+- [Public Infineon PVD dataset](https://doi.org/10.5281/zenodo.16881338), published under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 - [Technical report](report/technical_report.md): full method and interpretation
 - [Results guide](results/README.md): main tables and supporting sensitivity outputs
 - [Data and validation](docs/data-and-validation.md)
@@ -196,5 +194,5 @@ Release v1.0.
 - Reference-profile deviation: how far a record's 17 targets sit from a reference profile, a statistical summary
 - Ridge: a linear model with a penalty on large weights
 - Random Forest: an average of many decision trees
-- SPC (statistical process control): control charts for process stability
+- Multivariate statistical process control (SPC): monitoring several correlated process variables together
 - Virtual metrology: predicting a measurement from process inputs instead of measuring it
