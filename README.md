@@ -2,24 +2,20 @@
 
 <p align="center"><a href="#overview">Overview</a> · <a href="#data">Data</a> · <a href="#method">Method</a> · <a href="#results">Results</a> · <a href="#limits">Limits</a> · <a href="#usage">Usage</a> · <a href="#references">References</a> · <a href="#terms">Terms</a></p>
 
-I built two Python workflows on public, anonymized Infineon physical vapor deposition (PVD) data. The first is multivariate process monitoring to flag unusual runs and rank the channels driving them. The second is virtual metrology to predict all 17 released measurements. I developed the workflow on 4,848 AlCu records and fitted separate models on 1,740 WTi records to see how it held up on a second process.
+In 308 of the 970 aluminum-copper coating runs set aside for testing, all 17 measurements of the finished film matched a profile in the training data. When I kept each profile on one side of the split, prediction error rose 6.4%. I repeated the test on tungsten-titanium. There, grouping the profiles reduced error.
 
 ## Key results
 
-- On the ordinary held-out splits, Random Forest models cut 17-target root-mean-square error (RMSE) by 41% for AlCu and 43% for WTi versus Ridge regression. Aggregate R² was 0.622 and 0.604, respectively.
-- Fitted principal component analysis (PCA) and empirical Hotelling T² and squared prediction error limits on training rows. PCA retained about 90% of training variance in 34 AlCu components and 35 WTi components.
-- On held-out rows, 1.13% of AlCu and 4.31% of WTi rows trip an alert. The alerted AlCu rows do not show a clear shift in released output.
-- Re-evaluated the models with identical target profiles kept in the same split. Random Forest R² moved from 0.622 to 0.543 on AlCu and from 0.604 to 0.690 on WTi.
+- **Predicting film measurements.** On a random 80/20 split, a random forest cut root-mean-square error (RMSE) across the 17 measurements by 41% for aluminum-copper (AlCu) and 43% for tungsten-titanium (WTi), compared with ridge regression.
+- **Screening process readings.** Eleven of 970 held-out AlCu runs tripped an alert. Four tripped both alarms. The 95% intervals for the differences between those 11 and the other 959 included zero on both the mean of the 17 measurements and the deviation from a reference profile.
 
 ![AlCu direct 17-target virtual metrology predictions](figures/08_alcu_virtual_metrology_predictions.png)
 
 ## Overview
 
-The project uses physical vapor deposition (PVD) process data for two jobs. The first is a retrospective look at the multivariate process state. The second is virtual metrology, which predicts the measured targets from the process inputs.
+In physical vapor deposition (PVD), a tool coats a wafer with a thin metal film. Infineon’s public data pair the readings from each run with 17 measurements of the finished film. I used the readings to predict those measurements and to investigate runs where the sensors behaved unusually.
 
-AlCu is the main analysis. WTi repeats the same workflow with its own separately fitted models.
-
-I shrink the many correlated process inputs into a smaller monitoring view, rank the anonymous channels so excursions can be reviewed in order, and predict all 17 released target measurements directly.
+I developed the analysis on 4,848 AlCu records, then fitted separate models to 1,740 WTi records. Each coating has its own input channels and measurement scale.
 
 > [!NOTE]
 > <sub>PVD: step that deposits thin metal films on wafers · AlCu, WTi: the two metal layers in the data · virtual metrology: predicting a measurement from process inputs · target: one of 17 released measurements · excursion: a record far from the typical process state</sub>
@@ -75,11 +71,11 @@ Sources: data/raw/README.md, results/audit/*.csv
 
 ### Process-state monitoring
 
-Of 970 held-out AlCu rows, 11 (1.13%) raised an alert, and only four tripped both the T² and Q/SPE alarms. Those 11 rows don't look different from normal rows in released output, since both clustered 95% intervals cross zero. WTi alerted 4.31% of its held-out rows.
+The two alarms test different features of a run. Hotelling T² flags an unusually large change along a familiar combination of sensor readings. Q flags readings that no longer fit those familiar relationships. Both thresholds come from training data.
 
 ![AlCu retrospective process-state map](figures/05_alcu_process_state_map.png)
 
-The map plots each row's T² and Q/SPE as a multiple of its alert threshold. The two statistics catch different kinds of excursion. The alert categories only set review priority, and they are not fault labels.
+A value of 1 on either axis marks that alarm’s threshold. The map includes training rows. The held-out alert rates were 1.13% for AlCu and 4.31% for WTi.
 
 > [!IMPORTANT]
 > The thresholds are empirical alerts, not validated control limits. The four both-alarm rows had larger prediction error, but four rows is only a description and can't support a production rule.
@@ -90,14 +86,11 @@ Sources: results/alcu/alcu_pca_monitoring_summary.csv, results/alcu/alcu_alarm_c
 
 ### Channel contributions
 
-Contribution plots show which anonymous channels to look at first for a given excursion. For the held-out both-alarm row I picked, `Sensor_35` and `Sensor_54` rank high.
+For one held-out AlCu run that tripped both alarms, `Sensor_35` was the largest contributor to both Hotelling T² and Q. `Sensor_32` nearly matched it on Q. `Sensor_54` ranked second on T², with a much smaller contribution. The release omits what these channels measured. The equipment channel key would let an engineer check what `Sensor_35` and `Sensor_32` were recording.
 
 ![AlCu excursion contribution plots](figures/06_alcu_excursion_contributions.png)
 
-Each panel shows the top channels for one example row, with T² terms on the left and Q/SPE terms on the right.
-
-> [!WARNING]
-> The rankings help diagnosis, but they do not prove a physical cause.
+Read across a row of panels to see whether the same channels drive both alarms.
 
 [Full analysis](docs/process-monitoring.md)
 
@@ -105,9 +98,9 @@ Sources: results/alcu/alcu_excursion_contributions.csv, results/alcu/alcu_select
 
 ### Virtual metrology
 
-The Random Forest predicts all 17 released targets with an aggregate R² of 0.622 for AlCu and 0.604 for WTi. It cuts RMSE by 41% (AlCu) and 43% (WTi) compared with Ridge regression. Linear Regression did far worse, with a negative R² on both processes.
+On the ordinary split, the forest explained 62.2% of the variation across the 17 AlCu targets and 60.4% for WTi. Unregularized linear regression had negative R² on both coatings. Predicting the target means would have done better by that measure.
 
-The prediction plot at the top shows the mean index only as a secondary engineering summary.
+The opening figure pools the 17 target predictions on the left. Averaging them within a row, as in the right panel, can hide a large error on one target. The figure below reports errors separately for each target.
 
 ![AlCu mean absolute error for each of the 17 targets under Linear Regression, Ridge and Random Forest](figures/09_alcu_per_target_errors.png)
 
@@ -117,9 +110,9 @@ Sources: results/alcu/alcu_virtual_metrology_metrics.csv, results/alcu/alcu_virt
 
 ### Grouped split check
 
-Keeping identical target profiles together made the AlCu result a little worse, so the ordinary split is somewhat optimistic. Random Forest RMSE rose by 6.4% and aggregate R² fell from 0.622 to 0.543.
+An exact match across 17 measurements turned up on both sides of the original split for 308 held-out AlCu rows and 28 held-out WTi rows. Without a wafer ID, there is no way to tell whether these were repeat observations of the same wafer.
 
-Even so, the grouped result still predicts the released-scale targets usefully. WTi did better under the grouped split, with R² of 0.690.
+After grouping equal profiles, AlCu RMSE rose from 0.00870 to 0.00926 and R² fell from 0.622 to 0.543. On WTi, RMSE fell from 0.00829 to 0.00767 and R² rose from 0.604 to 0.690. The split matters on both coatings, in opposite directions.
 
 > [!IMPORTANT]
 > The two processes use different released scales, so their errors do not rank them physically.
@@ -130,7 +123,7 @@ Sources: results/alcu/alcu_virtual_metrology_metrics.csv, results/wti/wti_virtua
 
 ### WTi replication
 
-The same workflow on WTi, with every model fitted only on WTi data, gives a similar picture. Its alert rate is higher at 4.31%, and its Random Forest R² is 0.604.
+I carried the forest settings over from AlCu and fitted the trees again using WTi training rows. The sensor model also needed a new fit. It took 35 components to retain 90% of WTi input variance, compared with 34 for AlCu.
 
 ![Three bar charts comparing AlCu and WTi: retained components, held-out alert rate, and aggregate R² under both split designs](figures/13_cross_process_workflow_comparison.png)
 
